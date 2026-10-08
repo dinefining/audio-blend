@@ -26,22 +26,19 @@ body { margin: 0; overflow: hidden; font-family: var(--mono); font-weight: 400; 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-transform: inherit; letter-spacing: inherit; }
 
 /* chips: black boxes sized to their text */
-.chip { display: inline-block; background: var(--tbg); padding: 6px 9px; }
-#readout { position: absolute; left: var(--edge); top: var(--edge); right: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); }
-#r1 { font-size: 16px; letter-spacing: .02em; }
+.chip { display: inline-block; box-sizing: border-box; background: var(--tbg); padding: 6px 10px; border: var(--bw) solid var(--line); }
+#readout { position: absolute; left: var(--edge); top: var(--edge); right: calc(var(--edge) + var(--tile) + 8px); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); }
+#r1 { font-size: 16px; letter-spacing: .02em; height: var(--tile); display: inline-flex; align-items: center; padding-block: 0; }
 #r2 { font-size: 12px; color: #d6d6d6; text-transform: none; }
 #r2:empty { display: none; }
 
 /* tile rows: every gap is one --gap */
-.tiles { position: absolute; left: var(--edge); bottom: var(--edge); right: calc(var(--edge) + var(--tile) + 12px); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); pointer-events: none; }
+.tiles { position: absolute; left: var(--edge); bottom: var(--edge); right: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); pointer-events: none; }
 .row, .mrow { display: flex; flex-wrap: wrap; gap: var(--gap); pointer-events: auto; }
 #modeRow { display: flex; flex-direction: column; gap: var(--gap); pointer-events: auto; }
 .cell { position: relative; }
 .pop { position: absolute; left: 0; bottom: calc(100% + var(--gap)); display: flex; flex-direction: column; gap: var(--gap); }
-#tInfo { position: absolute; right: var(--edge); bottom: var(--edge); pointer-events: auto; }
-body.qtop #tInfo { bottom: auto; top: var(--edge); }
-body.qtop .tiles { right: var(--edge); }
-body.qtop #readout { right: calc(var(--edge) + var(--tile) + 8px); }
+#tInfo { position: absolute; right: var(--edge); top: var(--edge); pointer-events: auto; }
 
 .t { position: relative; box-sizing: border-box; width: var(--tile); height: var(--tile); background: var(--tbg); color: var(--fg); border: var(--bw) solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 13px; overflow: hidden; touch-action: none; }
 .t.q { font-size: 16px; }
@@ -70,9 +67,9 @@ body.col #tB .lt { color: var(--b); }
 
 /* info */
 .panel { background: var(--bg); border: var(--bw) solid var(--line); box-sizing: border-box; }
-#info { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
-#infoBox { width: min(100%, 760px); max-height: 100%; display: flex; position: relative; text-transform: none; font-size: 14px; line-height: 1.5; }
-#infoBody { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 26px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
+#info { position: fixed; z-index: 50; background: var(--bg); }
+#infoBox { width: 100%; height: 100%; display: flex; position: relative; text-transform: none; font-size: 14px; line-height: 1.5; border: 0; background: var(--bg); }
+#infoBody { flex: 1; min-height: 0; overflow-y: auto; padding: var(--edge) calc(var(--edge) * 2 + var(--tile)) 6px var(--edge); display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 380px); align-content: start; gap: 0 48px; }
 #infoBox .sec { margin: 0 0 16px; }
 #infoBox .h { color: var(--a); display: block; }
 #infoBox .kbd { display: grid; grid-template-columns: 9ch 1fr; column-gap: 12px; }
@@ -82,8 +79,7 @@ body.col #tB .lt { color: var(--b); }
 .sh { display: inline-block; width: 1ch; height: .72em; vertical-align: baseline; }
 .sh svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .sh path { fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linejoin: miter; vector-effect: non-scaling-stroke; }
-#infoClose { position: absolute; top: var(--edge); right: var(--edge); background: var(--bg); border: var(--bw) solid var(--line); }
-#infoClose:hover { border-color: var(--fg); }
+#infoClose { position: absolute; top: var(--edge); right: var(--edge); }
 
 @media (max-width: 640px) {
   :root { --tile: 33px; --edge: 8px; }
@@ -93,6 +89,5 @@ body.col #tB .lt { color: var(--b); }
   .t.q { font-size: 14px; }
   .t svg { transform: scale(.82); }
   #infoBox { font-size: 12.5px; }
-  #infoBody { grid-template-columns: 1fr; padding: 18px 18px 4px; }
-  #infoBody > div:first-child > .sec:first-child { padding-right: calc(var(--tile) + 8px); }
+  #infoBody { grid-template-columns: 1fr; }
 }

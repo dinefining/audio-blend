@@ -47,18 +47,18 @@ let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 }
 
 /* ───────── tile row ───────── */
 const CELLS = [
-  ['tPlay', 'Play / Stop · Space', ''],
-  ['tA', 'Layer A · tap to record or upload, or drop a file here', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
-  ['tB', 'Layer B · tap to record or upload, or drop a file here', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
-  ['tView', 'View · result, A only or B only', ''],
-  ['tDrift', 'Drift · B slides slowly against A', ''],
-  ['tColor', 'Colour · black and white, or A and B in colour', ''],
-  ['tMode', 'Mode · tap to choose a blend or boolean mode', ''],
+  ['tPlay', 'Play / Stop', ''],
+  ['tA', 'Layer A', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
+  ['tB', 'Layer B', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
+  ['tView', 'View', ''],
+  ['tDrift', 'Drift', ''],
+  ['tColor', 'Colour', ''],
+  ['tMode', 'Modes', ''],
   ['tMix', '', '<span class="fill" id="fMix"></span><span class="v" id="vMix"></span>'],
 ];
 const popFor = l => `<div class="pop" id="pop${l}" hidden>
-  <button class="t" id="rec${l}" type="button" data-hint="Record your voice into ${l} · up to 30 s · tap again to stop"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
-  <button class="t" id="up${l}" type="button" data-hint="Upload a sound into ${l}">${ICON.upload}</button></div>`;
+  <button class="t" id="rec${l}" type="button" data-hint="Record ${l}"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
+  <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button></div>`;
 $('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
 $('infoClose').innerHTML = ICON.cross;
 
@@ -78,9 +78,8 @@ function resize() {
   cv.width = W * DPR; cv.height = H * DPR;
   const pl = plot();
   Object.assign(ov.style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
-  // if the tile row plus the info tile no longer fit side by side, the info tile moves to the top-right corner
-  const t = $('tPlay').offsetWidth, g = 4, edge = W < 640 ? 8 : 14, n = $('mainRow').children.length;
-  document.body.classList.toggle('qtop', n * t + (n - 1) * g + 12 + t > pl.w - 2 * edge);
+  // the info panel covers the spectrogram box exactly, so its close button lands where the ? sits
+  Object.assign($('info').style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
   dirty = true;
 }
 addEventListener('resize', resize);
@@ -119,10 +118,10 @@ function thumb(layer) {
 }
 
 function draw() {
-  if (S.drift && E) { P.dt = (P.dt + 0.25) % E.F; dirty = true; readout(); }
+  if (S.drift && E && S.playing) { P.dt = (P.dt + 0.25) % E.F; dirty = true; readout(); }
   if (rec && E) {
     $('fRec' + rec.layer).style.height = `${rec.n / E.MAX * 100}%`;
-    S.note = `Recording into ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} / 30 s`; readout();
+    S.note = `Recording ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} s`; readout();
   }
   if (dirty) { computeImage(); dirty = false; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -164,11 +163,11 @@ function readout() {
   if (BOOL[P.mode]) parts.push(`@ ${fmtDb(P.th)}`);
   if (!BOOL[P.mode] && P.op < 1) parts.push(`${Math.round(P.op * 100)}%`);
   $('r1').textContent = parts.join(' ');
-  $('r2').textContent = !S.ready ? 'Tuning…' : S.note || S.hint || (S.view !== 'out' ? `Showing ${S.view.toUpperCase()} only` : '');
+  $('r2').textContent = !S.ready ? 'Tuning…' : S.note || S.hint || '';
   const isB = !!BOOL[P.mode], mix = isB ? (P.th - 0.05) / 0.9 : P.op;
   $('vMix').textContent = isB ? Math.round(P.th * DB - DB) : Math.round(P.op * 100);
   $('fMix').style.height = `${mix * 100}%`;
-  $('tMix').dataset.hint = isB ? 'Mix · threshold: how loud counts as inside a shape · drag up or down' : 'Mix · opacity of B · drag up or down';
+  $('tMix').dataset.hint = isB ? 'Threshold' : 'Opacity';
 }
 function syncUI() {
   document.body.classList.toggle('col', S.color);
@@ -210,12 +209,13 @@ const toggleInfo = force => { const i = $('info'); i.hidden = typeof force === '
 
 // hints: hover, focus, or a touch shows what a tile does
 let hintT;
-document.querySelectorAll('.tiles .t, #tInfo').forEach(t => {
+const hintTiles = () => document.querySelectorAll('.tiles .t, #tInfo');
+hintTiles().forEach(t => {
   const show = () => { clearTimeout(hintT); S.hint = t.dataset.hint; readout(); };
   const hide = () => { S.hint = ''; readout(); };
   t.addEventListener('mouseenter', show); t.addEventListener('mouseleave', hide);
-  t.addEventListener('focus', show); t.addEventListener('blur', hide);
-  t.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') { show(); hintT = setTimeout(hide, 2500); } });
+  t.addEventListener('focus', () => { if (t.matches(':focus-visible')) show(); }); t.addEventListener('blur', hide);
+  t.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' && t.closest('#modeRow')) { show(); hintT = setTimeout(hide, 2500); } });
 });
 
 // the mix tile: its fill is the value; opacity in blend modes, threshold in boolean modes
@@ -250,7 +250,7 @@ function loadSamples(layer, mono, name) {
   E.setRaw(layer, mono.length > E.MAX ? mono.slice(0, E.MAX) : mono, false);
   E.rebuild();
   thumb('A'); thumb('B'); dirty = true;
-  say(`${layer} · ${name}${mono.length > E.MAX ? ' · first 30 s' : ''} · loop ${(E.L / E.SR).toFixed(1)} s`);
+  say(`${layer} · ${name} · ${(E.L / E.SR).toFixed(1)} s loop`);
 }
 async function loadFile(layer, file) {
   if (!E) return;
@@ -261,7 +261,7 @@ async function loadFile(layer, file) {
     for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < ab.length; i++) mono[i] += d[i] / ab.numberOfChannels; }
     loadSamples(layer, mono, file.name);
     S.pop = null;
-  } catch (err) { say(`Could not read ${file.name}. Try WAV, MP3, OGG or M4A.`); }
+  } catch (err) { say(`Can't read ${file.name}`); }
   S.loading[layer] = false; syncUI();
 }
 async function startRec(layer) {
@@ -282,7 +282,7 @@ async function startRec(layer) {
     syncUI();
   } catch (err) {
     rec = null; syncUI();
-    say('The microphone is not available here. Allow it in your browser, or upload a file instead.');
+    say('Microphone blocked · upload instead');
   }
 }
 function stopRec() {
@@ -290,7 +290,7 @@ function stopRec() {
   try { r.src.disconnect(); r.sp.disconnect(); r.mute.disconnect(); } catch (e) {}
   r.stream.getTracks().forEach(t => t.stop());
   $('fRec' + r.layer).style.height = '0';
-  if (r.n < AC.sampleRate * 0.3) { syncUI(); say('That recording was too short. Hold on a little longer.'); return; }
+  if (r.n < AC.sampleRate * 0.3) { syncUI(); say('Too short'); return; }
   S.loading[r.layer] = true; S.pop = null; syncUI();
   setTimeout(() => { loadSamples(r.layer, r.buf.slice(0, r.n), 'your recording'); S.loading[r.layer] = false; syncUI(); }, 30);
 }
