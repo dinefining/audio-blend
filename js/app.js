@@ -37,7 +37,7 @@ function venn(op) {
   else body = `<clipPath id="${id}"><path d="${Rr}"/></clipPath><path class="f" clip-path="url(#${id})" d="${L}"/>` + rings;
   return svg(24, 18, body);
 }
-const modeGlyph = m => BOOL[m] ? venn(m) : ABBR[m];
+const modeGlyph = m => BOOL[m] ? venn(m) : `<span class="lt">${ABBR[m]}</span>`;
 
 /* ───────── state ───────── */
 let AC = null, E = null, master = null;
@@ -82,7 +82,7 @@ function resize() {
     const n = 8, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((pl.w - 2 * edge - (n - 1) * g) / n)));
     document.documentElement.style.setProperty('--tile', t + 'px');
     document.documentElement.style.setProperty('--k', (t / 44).toFixed(3));
-    document.documentElement.style.setProperty('--edge', (pl.w - n * t - (n - 1) * g) / 2 + 'px');
+    document.documentElement.style.setProperty('--edge', Math.round((pl.w - n * t - (n - 1) * g) / 2) + 'px');
   } else { document.documentElement.style.removeProperty('--tile'); document.documentElement.style.removeProperty('--k'); document.documentElement.style.removeProperty('--edge'); }
   // the info panel covers the spectrogram box exactly, so its close button lands where the ? sits
   Object.assign($('info').style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
@@ -167,7 +167,7 @@ function readout() {
   const F = E ? E.F : 750, dur = E ? E.L / E.SR : 8, sec = (((P.dt % F) + F) % F) / F * dur, parts = [P.mode];
   parts.push(`+${sec.toFixed(2)}S`, `${P.st > 0 ? '+' : P.st < 0 ? '-' : '±'}${Math.abs(P.st)}ST`);
   parts.push(`${Math.round((BOOL[P.mode] ? (P.th - 0.05) / 0.9 : P.op) * 100)}%`);
-  $('r1').textContent = parts.join(' ');
+  $('r1').innerHTML = `<span class="lt">${parts.join(' ')}</span>`;
   $('r2').textContent = !S.ready ? 'Tuning…' : S.note || S.hint || '';
   const isB = !!BOOL[P.mode], mix = isB ? (P.th - 0.05) / 0.9 : P.op;
   $('vMix').textContent = Math.round(mix * 100);
