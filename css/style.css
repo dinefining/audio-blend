@@ -53,15 +53,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .t .fill.rec { background: #4a1612; }
 .t .v, .t .lt { position: relative; white-space: nowrap; }
 .t canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; opacity: .5; pointer-events: none; }
-.t svg { display: block; position: relative; overflow: visible; }
-.t svg .s { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; }
+/* icons scale with the tile (--k), their strokes stay the same width */
+.t svg { display: block; position: relative; overflow: visible; width: calc(var(--iw) * var(--k, 1)); height: calc(var(--ih) * var(--k, 1)); }
+.t svg .s { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; vector-effect: non-scaling-stroke; }
 .t svg .f { fill: currentColor; }
 .t svg .e { fill: var(--bg); }
 .t svg .red { fill: #ff3b30; }
 .t.on svg .e { fill: var(--fg); }
 .t svg .e { fill: var(--tbg); }
 .t:hover svg .e { fill: var(--tbg-hover); }
-.t svg .ln { fill: none; stroke: currentColor; stroke-width: .6; }
+.t svg .ln { fill: none; stroke: currentColor; stroke-width: .6; vector-effect: non-scaling-stroke; }
 body.col #tA .lt { color: var(--a); }
 body.col #tB .lt { color: var(--b); }
 
@@ -69,8 +70,9 @@ body.col #tB .lt { color: var(--b); }
 .panel { background: var(--bg); border: var(--bw) solid var(--line); box-sizing: border-box; }
 #info { position: fixed; z-index: 50; background: var(--bg); }
 #infoBox { width: 100%; height: 100%; display: flex; position: relative; text-transform: none; font-size: 14px; line-height: 1.5; border: 0; background: var(--bg); }
-#infoBody { flex: 1; min-height: 0; overflow-y: auto; padding: var(--edge) calc(var(--edge) * 2 + var(--tile)) 6px var(--edge); display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 380px); align-content: start; gap: 0 48px; }
+#infoBody { flex: 1; min-height: 0; overflow-y: auto; padding: var(--edge) calc(var(--edge) * 2 + var(--tile)) var(--edge) var(--edge); display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 380px); align-content: start; gap: 0 48px; }
 #infoBox .sec { margin: 0 0 16px; }
+#infoBody > div > .sec:last-child { margin-bottom: 0; }
 #infoBox .h { color: var(--a); display: block; }
 #infoBox .kbd { display: grid; grid-template-columns: 9ch 1fr; column-gap: 12px; }
 #infoBox .credit { color: var(--b); }
@@ -83,11 +85,11 @@ body.col #tB .lt { color: var(--b); }
 
 @media (max-width: 640px) {
   :root { --tile: 33px; --edge: 8px; }
-  #r1 { font-size: 13px; }
+  #r1 { font-size: calc(16px * var(--k, .75)); padding-inline: calc(10px * var(--k, .75)); }
   #r2 { font-size: 11px; }
-  .t { font-size: 11px; }
-  .t.q { font-size: 14px; }
-  .t svg { transform: scale(.82); }
+  .t { font-size: calc(13px * var(--k, .75)); }
+  .t.q { font-size: calc(16px * var(--k, .75)); }
   #infoBox { font-size: 12.5px; }
-  #infoBody { grid-template-columns: 1fr; }
+  #infoBody { grid-template-columns: 1fr; row-gap: 16px; }
+  #r2 { display: none; }
 }
