@@ -1,0 +1,97 @@
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: block; src: url("../fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+/* Layout: the blended spectrogram fills the screen inside a thin frame; readout chips top-left, one row of titled square tiles bottom-left (modes open as a row above), info bottom-right. Same 14px inset for every edge. */
+:root {
+  --bg: #000;
+  --fg: #fff;
+  --dim: #9a9a9a;
+  --line: #7c7c7c;
+  --well: #3a3a3a;
+  --tbg: #161616;
+  --tbg-hover: #262626;
+  --bw: .5px;
+  --a: #ffd23f;
+  --b: #4a8cff;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --tile: 44px;
+  --gap: 4px;
+  --edge: 14px;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; background: var(--bg); color: var(--fg); }
+body { margin: 0; overflow: hidden; font-family: var(--mono); font-weight: 400; font-size: 13px; line-height: 1.2; -webkit-user-select: none; user-select: none; text-transform: uppercase; }
+#stage { position: fixed; inset: 0; touch-action: none; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#ov { position: absolute; pointer-events: none; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-transform: inherit; letter-spacing: inherit; }
+
+/* chips: black boxes sized to their text */
+.chip { display: inline-block; background: var(--tbg); padding: 6px 9px; }
+#readout { position: absolute; left: var(--edge); top: var(--edge); right: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); }
+#r1 { font-size: 16px; letter-spacing: .02em; }
+#r2 { font-size: 12px; color: #d6d6d6; text-transform: none; }
+#r2:empty { display: none; }
+
+/* tile rows: every gap is one --gap */
+.tiles { position: absolute; left: var(--edge); bottom: var(--edge); right: calc(var(--edge) + var(--tile) + 12px); display: flex; flex-direction: column; align-items: flex-start; gap: var(--gap); pointer-events: none; }
+.row, .mrow { display: flex; flex-wrap: wrap; gap: var(--gap); pointer-events: auto; }
+#modeRow { display: flex; flex-direction: column; gap: var(--gap); pointer-events: auto; }
+.cell { position: relative; }
+.pop { position: absolute; left: 0; bottom: calc(100% + var(--gap)); display: flex; flex-direction: column; gap: var(--gap); }
+#tInfo { position: absolute; right: var(--edge); bottom: var(--edge); pointer-events: auto; }
+body.qtop #tInfo { bottom: auto; top: var(--edge); }
+body.qtop .tiles { right: var(--edge); }
+body.qtop #readout { right: calc(var(--edge) + var(--tile) + 8px); }
+
+.t { position: relative; box-sizing: border-box; width: var(--tile); height: var(--tile); background: var(--tbg); color: var(--fg); border: var(--bw) solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 13px; overflow: hidden; touch-action: none; }
+.t.q { font-size: 16px; }
+.t:hover, .t.drop { background: var(--tbg-hover); border-color: var(--fg); }
+.t:focus-visible { outline: var(--bw) solid var(--fg); outline-offset: 1px; }
+.t.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+/* A and B keep their thumbnail when open; only the border lights up */
+#tA.on, #tB.on { background: var(--tbg); color: var(--fg); }
+.t.off { color: #5c5c5c; }
+.t[disabled] { cursor: default; color: #5c5c5c; }
+.t .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--well); pointer-events: none; }
+.t .fill.rec { background: #4a1612; }
+.t .v, .t .lt { position: relative; white-space: nowrap; }
+.t canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; opacity: .5; pointer-events: none; }
+.t svg { display: block; position: relative; overflow: visible; }
+.t svg .s { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; }
+.t svg .f { fill: currentColor; }
+.t svg .e { fill: var(--bg); }
+.t svg .red { fill: #ff3b30; }
+.t.on svg .e { fill: var(--fg); }
+.t svg .e { fill: var(--tbg); }
+.t:hover svg .e { fill: var(--tbg-hover); }
+.t svg .ln { fill: none; stroke: currentColor; stroke-width: .6; }
+body.col #tA .lt { color: var(--a); }
+body.col #tB .lt { color: var(--b); }
+
+/* info */
+.panel { background: var(--bg); border: var(--bw) solid var(--line); box-sizing: border-box; }
+#info { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+#infoBox { width: min(100%, 760px); max-height: 100%; overflow-y: auto; padding: 24px 26px 10px; text-transform: none; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; position: relative; }
+#infoBox .sec { margin: 0 0 16px; }
+#infoBox .h { color: var(--a); display: block; }
+#infoBox .kbd { display: grid; grid-template-columns: 9ch 1fr; column-gap: 12px; }
+#infoBox .credit { color: var(--b); }
+#infoBox a { color: inherit; text-decoration: underline; text-decoration-thickness: var(--bw); text-underline-offset: 3px; }
+#infoBox a:hover { text-decoration-thickness: 1px; }
+.sh { display: inline-block; width: 1ch; height: .72em; vertical-align: baseline; }
+.sh svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.sh path { fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linejoin: miter; vector-effect: non-scaling-stroke; }
+#infoClose { position: absolute; top: var(--edge); right: var(--edge); background: var(--bg); border: var(--bw) solid var(--line); }
+#infoClose:hover { border-color: var(--fg); }
+
+@media (max-width: 640px) {
+  :root { --tile: 33px; --edge: 8px; }
+  #r1 { font-size: 13px; }
+  #r2 { font-size: 11px; }
+  .t { font-size: 11px; }
+  .t.q { font-size: 14px; }
+  .t svg { transform: scale(.82); }
+  #infoBox { grid-template-columns: 1fr; padding: 18px 18px 4px; }
+  #infoClose { position: sticky; top: 0; grid-row: 1; justify-self: end; margin-bottom: calc(var(--tile) * -1); z-index: 2; }
+  #infoBox > div:nth-of-type(1) > .sec:first-child { padding-right: calc(var(--tile) + 10px); }
+}
