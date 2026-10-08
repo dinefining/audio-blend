@@ -6,7 +6,7 @@ A Maybe Machine by [Ravi Popat](https://ravipopat.info) · [ravipopat.info/maybe
 
 ## Use
 
-- Tap A or B to record your voice or upload a sound, or drop a file on them. Each layer loops its first 8 seconds.
+- Tap A or B to record your voice or upload a sound, or drop a file on them. The loop is as long as the longer sound (up to 30 s); the shorter one repeats.
 - Drag the spectrogram to move layer B in time (sideways) and pitch (up and down).
 - Press ? in the app for modes and keyboard shortcuts.
 

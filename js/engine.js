@@ -1,4 +1,4 @@
-// Audio Blend audio engine: sound generators, spectral analysis, blend modes and resynthesis.
+// Audio Blend engine: sound generators, spectral analysis, blend modes and resynthesis.
 const N = 2048, HOP = 512, BINS = N / 2 + 1, LOOP_SEC = 8, DB = 60;
 const SOUNDS = ['voice', 'rain', 'bell', 'sea', 'organ', 'birds'];
 const WIN = new Float64Array(N);
@@ -186,25 +186,27 @@ function blendValue(p, a, b) {
 }
 
 function analyse(x, L) {
-  const F = L / HOP, re = new Float64Array(N), im = new Float64Array(N);
+  const F = L / HOP, re = new Float64Array(N), im = new Float64Array(N), TW = 2 * Math.PI, K = 20 / Math.LN10;
   const mag = new Float32Array(F * BINS), ph = new Float32Array(F * BINS);
   for (let f = 0; f < F; f++) {
-    const s = f * HOP - N / 2;
-    for (let n = 0; n < N; n++) { re[n] = x[((s + n) % L + L) % L] * WIN[n]; im[n] = 0; }
+    let s = f * HOP - N / 2; s = ((s % L) + L) % L;
+    for (let n = 0; n < N; n++) { let j = s + n; if (j >= L) j -= L; re[n] = x[j] * WIN[n]; im[n] = 0; }
     fft(re, im, false);
-    for (let k = 0; k < BINS; k++) { mag[f * BINS + k] = Math.hypot(re[k], im[k]); ph[f * BINS + k] = Math.atan2(im[k], re[k]); }
+    const o = f * BINS;
+    for (let k = 0; k < BINS; k++) { const r = re[k], q = im[k]; mag[o + k] = Math.sqrt(r * r + q * q); ph[o + k] = Math.atan2(q, r); }
   }
-  const r = rng(5), smp = []; for (let i = 0; i < 20000; i++) smp.push(mag[Math.floor(r() * mag.length)]);
-  smp.sort((p, q) => p - q);
+  const rr = rng(5), smp = new Float32Array(20000); for (let i = 0; i < smp.length; i++) smp[i] = mag[Math.floor(rr() * mag.length)];
+  smp.sort();
   const scale = 1 / (smp[Math.floor(smp.length * 0.995)] + 1e-9);
-  const v = new Float32Array(F * BINS), ifq = new Float32Array(F * BINS), TW = 2 * Math.PI;
+  const v = new Float32Array(F * BINS), ifq = new Float32Array(F * BINS), adv = TW * HOP / N, back = N / (TW * HOP);
   for (let f = 0; f < F; f++) {
-    const pf = ((f - 1 + F) % F) * BINS;
+    const pf = ((f - 1 + F) % F) * BINS, o = f * BINS;
     for (let k = 0; k < BINS; k++) {
-      const i = f * BINS + k;
-      v[i] = Math.max(0, Math.min(1, (20 * Math.log10(mag[i] * scale + 1e-12) + DB) / DB));
-      let d = ph[i] - ph[pf + k] - TW * k * HOP / N; d -= TW * Math.round(d / TW);
-      ifq[i] = k + d * N / (TW * HOP);
+      const i = o + k, m = mag[i] * scale;
+      const db = m > 1e-12 ? K * Math.log(m) : -240;
+      v[i] = db <= -DB ? 0 : db >= 0 ? 1 : (db + DB) / DB;
+      let dd = ph[i] - ph[pf + k] - adv * k; dd -= TW * Math.round(dd / TW);
+      ifq[i] = k + dd * back;
     }
   }
   return { v, ifq, scale };
@@ -218,16 +220,33 @@ function makeEngine(SR) {
     phi: new Float64Array(BINS), acc: new Float32Array(N), re: new Float64Array(N), im: new Float64Array(N),
     om: new Float32Array(BINS), fifo: new Float32Array(16384), fr: 0, fw: 0, agc: 1,
   };
-  E.addSource = (id, x) => { E.sources[id] = analyse(x, L); };
+  E.addSource = (id, x) => { E.sources[id] = analyse(x, E.L); };
+  // The loop runs as long as the longer layer (up to 30 s); the shorter one repeats to fill it.
+  E.MAX = Math.round(30 * SR / HOP) * HOP;
+  E.raw = {};
+  E.setRaw = (id, mono, seamless) => { E.raw[id] = { x: mono, seamless }; };
+  E.rebuild = () => {
+    const lens = Object.values(E.raw).map(r => r.x.length);
+    const Lnew = Math.max(HOP * 16, Math.round(Math.min(E.MAX, Math.max(...lens)) / HOP) * HOP), X = Math.floor(SR * 0.05), srcs = {};
+    for (const id in E.raw) {
+      const { x, seamless } = E.raw[id], n = x.length;
+      let y = x;
+      if (!seamless) { y = x.slice(); const fz = Math.min(Math.floor(SR * 0.01), n >> 2); for (let i = 0; i < fz; i++) { const g = i / fz; y[i] *= g; y[n - 1 - i] *= g; } }
+      const raw = new Float32Array(Lnew + X);
+      for (let i = 0; i < Lnew + X; i++) raw[i] = y[i % n];
+      srcs[id] = analyse(normalize(xfadeLoop(raw, Lnew, X)), Lnew);
+    }
+    E.L = Lnew; E.F = Lnew / HOP; E.sources = srcs; E.frame %= E.F; E.p.dt = ((E.p.dt % E.F) + E.F) % E.F;
+  };
   // Value of layer B at frame f, bin position kb (fractional), after time offset and pitch shift.
   E.sampleB = (B, f, kb) => {
     const i0 = Math.floor(kb); if (i0 < 0 || i0 >= BINS - 1) return 0;
-    const fb = (((f - Math.round(E.p.dt)) % F) + F) % F, fr = kb - i0, o = fb * BINS;
+    const F = E.F, fb = (((f - Math.round(E.p.dt)) % F) + F) % F, fr = kb - i0, o = fb * BINS;
     return B.v[o + i0] * (1 - fr) + B.v[o + i0 + 1] * fr;
   };
   E.step = () => {
     const p = E.p, A = E.sources[p.a], B = E.sources[p.b], fi = E.frame, re = E.re, im = E.im, om = E.om;
-    const ratio = Math.pow(2, p.st / 12), fb = (((fi - Math.round(p.dt)) % F) + F) % F, TW = 2 * Math.PI;
+    const F = E.F, ratio = Math.pow(2, p.st / 12), fb = (((fi - Math.round(p.dt)) % F) + F) % F, TW = 2 * Math.PI;
     let outE = 0, refE = 0;
     for (let k = 0; k < BINS; k++) {
       const a = A.v[fi * BINS + k], kb = k / ratio, b = E.sampleB(B, fi, kb);

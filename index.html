@@ -33,16 +33,17 @@
 <div id="info" hidden>
   <div id="infoBox" class="panel" role="dialog" aria-label="How Audio Blend works">
     <button id="infoClose" class="t" type="button" aria-label="Close"></button>
+    <div id="infoBody">
     <div>
       <div class="sec"><span class="h">Audio Blend</span>Two sounds, two spectrogram layers. B sits on top of A. Blend them like images: what you see is what you hear.</div>
-      <div class="sec"><span class="h">Sounds</span>Tap A or B to record your voice or upload a file, or drop a file on them. Each loops its first 8 seconds.</div>
+      <div class="sec"><span class="h">Sounds</span>Tap A or B to record your voice or upload a file, or drop a file on them. The loop is as long as the longer sound, up to 30 seconds. The shorter one repeats to fill it.</div>
       <div class="sec"><span class="h">Move B</span>Drag sideways to shift B in time, up or down to shift its pitch. Double-tap resets.</div>
       <div class="sec"><span class="h">Try</span>The same sound in A and B, B shifted 2&nbsp;s, mode DIF: only what changed.</div>
     </div>
     <div>
       <div class="sec"><span class="h">Keys</span>
         <div class="kbd">
-          <span>Space</span><span>Play / stop</span>
+          <span>Space</span><span>Play / Stop</span>
           <span>M</span><span>Next mode</span>
           <span>U I X E</span><span>Boolean modes</span>
                     <span>O / <span class="sh"><svg viewBox="0 0 6 8" aria-hidden="true"><path d="M3 .4 L5.7 3.7 H4.2 V7.6 H1.8 V3.7 H.3 Z"/></svg></span>O</span><span>Mix − / +</span>
@@ -57,6 +58,7 @@
       <div class="sec"><span class="h">Mix</span>Opacity of B in blend modes, the threshold in boolean modes.</div>
       <div class="sec credit">A <a href="https://ravipopat.info/maybe-machines" target="_blank" rel="noopener">Maybe Machine</a> by <a href="https://ravipopat.info" target="_blank" rel="noopener">Ravi Popat</a>.</div>
     </div>
+  </div>
   </div>
 </div>
 

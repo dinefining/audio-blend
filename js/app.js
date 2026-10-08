@@ -47,7 +47,7 @@ let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 }
 
 /* ───────── tile row ───────── */
 const CELLS = [
-  ['tPlay', 'Play / stop · space', ''],
+  ['tPlay', 'Play / Stop · Space', ''],
   ['tA', 'Layer A · tap to record or upload, or drop a file here', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
   ['tB', 'Layer B · tap to record or upload, or drop a file here', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
   ['tView', 'View · result, A only or B only', ''],
@@ -57,7 +57,7 @@ const CELLS = [
   ['tMix', '', '<span class="fill" id="fMix"></span><span class="v" id="vMix"></span>'],
 ];
 const popFor = l => `<div class="pop" id="pop${l}" hidden>
-  <button class="t" id="rec${l}" type="button" data-hint="Record your voice into ${l} · up to 8 s · tap again to stop"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
+  <button class="t" id="rec${l}" type="button" data-hint="Record your voice into ${l} · up to 30 s · tap again to stop"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
   <button class="t" id="up${l}" type="button" data-hint="Upload a sound into ${l}">${ICON.upload}</button></div>`;
 $('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
 $('infoClose').innerHTML = ICON.cross;
@@ -121,8 +121,8 @@ function thumb(layer) {
 function draw() {
   if (S.drift && E) { P.dt = (P.dt + 0.25) % E.F; dirty = true; readout(); }
   if (rec && E) {
-    $('fRec' + rec.layer).style.height = `${rec.n / E.L * 100}%`;
-    S.note = `Recording into ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} / 8 s`; readout();
+    $('fRec' + rec.layer).style.height = `${rec.n / E.MAX * 100}%`;
+    S.note = `Recording into ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} / 30 s`; readout();
   }
   if (dirty) { computeImage(); dirty = false; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -133,7 +133,8 @@ function draw() {
   ctx.fillStyle = '#9a9a9a'; ctx.font = `${W < 640 ? 10 : 11}px "JetBrains Mono", ui-monospace, monospace`; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
   [[100, '100'], [1000, '1k'], [10000, '10k']].forEach(([f, t]) => { const y = pl.y + pl.h * (1 - Math.log(f / FMIN) / Math.log(FMAX / FMIN)); ctx.fillText(t, pl.x - 8, y); ctx.fillRect(pl.x - 5, Math.round(y), 3, hair); });
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  for (let s = 0; s <= 8; s += 2) { const x = pl.x + pl.w * s / 8; ctx.fillText(s + 's', Math.min(Math.max(x, pl.x + 10), pl.x + pl.w - 10), pl.y + pl.h + 5); }
+  const dur = E ? E.L / E.SR : 8, stp = dur <= 10.5 ? 2 : dur <= 20.5 ? 5 : 10;
+  for (let s = 0; s <= dur + 0.01; s += stp) { const x = pl.x + pl.w * s / dur; ctx.fillText(s + 's', Math.min(Math.max(x, pl.x + 10), pl.x + pl.w - 10), pl.y + pl.h + 5); }
   if (E) {
     const bcol = S.color ? '#4a8cff' : '#fff';
     const bx = Math.round(pl.x + pl.w * (((P.dt % E.F) + E.F) % E.F) / E.F) + 0.5;
@@ -158,7 +159,7 @@ function draw() {
 /* ───────── readout + tiles ───────── */
 const fmtDb = th => `${Math.round(th * DB - DB)}DB`;
 function readout() {
-  const F = E ? E.F : 750, sec = (((P.dt % F) + F) % F) / F * LOOP_SEC, parts = [P.mode];
+  const F = E ? E.F : 750, dur = E ? E.L / E.SR : 8, sec = (((P.dt % F) + F) % F) / F * dur, parts = [P.mode];
   parts.push(`+${sec.toFixed(2)}S`, `${P.st > 0 ? '+' : P.st < 0 ? '-' : '±'}${Math.abs(P.st)}ST`);
   if (BOOL[P.mode]) parts.push(`@ ${fmtDb(P.th)}`);
   if (!BOOL[P.mode] && P.op < 1) parts.push(`${Math.round(P.op * 100)}%`);
@@ -246,11 +247,10 @@ addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => e.preventDefault());
 function say(msg) { S.note = msg; readout(); clearTimeout(say.t); say.t = setTimeout(() => { S.note = ''; readout(); }, 4000); }
 function loadSamples(layer, mono, name) {
-  const L = E.L, X = Math.floor(AC.sampleRate * 0.05), n = mono.length;
-  const raw = new Float32Array(L + X); for (let i = 0; i < L + X; i++) raw[i] = mono[i % n];
-  E.addSource(layer, normalize(xfadeLoop(raw, L, X)));
-  thumb(layer); dirty = true;
-  say(`${layer} · ${name}${n < L ? ' · repeated to fill 8 s' : n > L ? ' · first 8 s' : ''}`);
+  E.setRaw(layer, mono.length > E.MAX ? mono.slice(0, E.MAX) : mono, false);
+  E.rebuild();
+  thumb('A'); thumb('B'); dirty = true;
+  say(`${layer} · ${name}${mono.length > E.MAX ? ' · first 30 s' : ''} · loop ${(E.L / E.SR).toFixed(1)} s`);
 }
 async function loadFile(layer, file) {
   if (!E) return;
@@ -271,12 +271,12 @@ async function startRec(layer) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     const src = AC.createMediaStreamSource(stream), sp = AC.createScriptProcessor(4096, 1, 1), mute = AC.createGain();
     mute.gain.value = 0;
-    rec = { layer, stream, src, sp, mute, buf: new Float32Array(E.L), n: 0 };
+    rec = { layer, stream, src, sp, mute, buf: new Float32Array(E.MAX), n: 0 };
     sp.onaudioprocess = ev => {
       if (!rec) return;
-      const d = ev.inputBuffer.getChannelData(0), k = Math.min(d.length, E.L - rec.n);
+      const d = ev.inputBuffer.getChannelData(0), k = Math.min(d.length, E.MAX - rec.n);
       rec.buf.set(d.subarray(0, k), rec.n); rec.n += k;
-      if (rec.n >= E.L) setTimeout(stopRec, 0);
+      if (rec.n >= E.MAX) setTimeout(stopRec, 0);
     };
     src.connect(sp); sp.connect(mute); mute.connect(AC.destination);
     syncUI();
@@ -291,8 +291,8 @@ function stopRec() {
   r.stream.getTracks().forEach(t => t.stop());
   $('fRec' + r.layer).style.height = '0';
   if (r.n < AC.sampleRate * 0.3) { syncUI(); say('That recording was too short. Hold on a little longer.'); return; }
-  loadSamples(r.layer, r.buf.subarray(0, r.n), 'your recording');
-  S.pop = null; syncUI();
+  S.loading[r.layer] = true; S.pop = null; syncUI();
+  setTimeout(() => { loadSamples(r.layer, r.buf.slice(0, r.n), 'your recording'); S.loading[r.layer] = false; syncUI(); }, 30);
 }
 
 /* ───────── buttons + keys ───────── */
@@ -349,8 +349,9 @@ cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', 
 async function boot() {
   try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (err) { $('r2').textContent = 'This browser has no Web Audio'; return; }
   const eng = makeEngine(AC.sampleRate);
-  await new Promise(r => setTimeout(r, 0)); eng.addSource('A', GEN.voice(AC.sampleRate, eng.L));
-  await new Promise(r => setTimeout(r, 0)); eng.addSource('B', GEN.rain(AC.sampleRate, eng.L));
+  await new Promise(r => setTimeout(r, 0)); eng.setRaw('A', GEN.voice(AC.sampleRate, eng.L), true);
+  await new Promise(r => setTimeout(r, 0)); eng.setRaw('B', GEN.rain(AC.sampleRate, eng.L), true);
+  eng.rebuild();
   Object.assign(eng.p, P); P = eng.p; E = eng;
   master = AC.createGain(); master.gain.value = 0;
   const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6; comp.attack.value = 0.004; comp.release.value = 0.2;
