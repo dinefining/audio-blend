@@ -60,7 +60,7 @@ const popFor = l => `<div class="pop" id="pop${l}" hidden>
   <button class="t" id="rec${l}" type="button" data-hint="Record ${l}"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
   <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button></div>`;
 $('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
-$('infoClose').innerHTML = ICON.cross;
+$('stage').appendChild($('info'));   // same layer as the tiles, so the ? can sit above the panel and become its close button
 
 /* ───────── canvas ───────── */
 const cv = $('cv'), ctx = cv.getContext('2d'), ov = $('ov');
@@ -79,10 +79,10 @@ function resize() {
   const pl = plot();
   Object.assign(ov.style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
   if (narrow) {
-    const n = 8, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((pl.w - 2 * edge - (n - 1) * g) / n)));
+    const n = 8, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
     document.documentElement.style.setProperty('--tile', t + 'px');
     document.documentElement.style.setProperty('--k', (t / 44).toFixed(3));
-    document.documentElement.style.setProperty('--edge', Math.round((pl.w - n * t - (n - 1) * g) / 2) + 'px');
+    document.documentElement.style.setProperty('--edge', Math.floor((Math.floor(pl.w) - n * t - (n - 1) * g) / 2) + 'px');
   } else { document.documentElement.style.removeProperty('--tile'); document.documentElement.style.removeProperty('--k'); document.documentElement.style.removeProperty('--edge'); }
   // the info panel covers the spectrogram box exactly, so its close button lands where the ? sits
   Object.assign($('info').style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
@@ -210,7 +210,20 @@ document.addEventListener('pointerdown', e => {
 }, true);
 const togglePop = l => { S.pop = S.pop === l ? null : l; if (S.pop) $('modeRow').hidden = true; syncUI(); };
 function setMode(m) { P.mode = m; dirty = true; syncUI(); }
-const toggleInfo = force => { const i = $('info'); i.hidden = typeof force === 'boolean' ? !force : !i.hidden; if (!i.hidden) $('infoClose').focus(); };
+function fitInfo() {
+  const info = $('info'); if (info.hidden) return;
+  info.classList.remove('wrap');
+  const b = $('infoBody'); if (W >= 640 && (b.scrollWidth > b.clientWidth + 1 || [...b.children].some(c => c.scrollWidth > c.clientWidth + 1))) info.classList.add('wrap');
+  const x = $('tInfo').getBoundingClientRect(), bx = $('infoBox').getBoundingClientRect();
+  info.classList.toggle('overlap', W >= 640 && x.left < bx.right && x.bottom > bx.top);
+}
+addEventListener('resize', () => requestAnimationFrame(fitInfo));
+const toggleInfo = force => {
+  const i = $('info'); i.hidden = typeof force === 'boolean' ? !force : !i.hidden;
+  $('tInfo').innerHTML = i.hidden ? '<span class="lt">?</span>' : ICON.cross;
+  fitInfo();
+  $('tInfo').setAttribute('aria-label', i.hidden ? 'Info' : 'Close info'); $('tInfo').dataset.hint = i.hidden ? 'Info' : 'Close';
+};
 
 // hints: hover, focus, or a touch shows what a tile does
 let hintT;
@@ -308,8 +321,7 @@ $('tDrift').onclick = () => { S.drift = !S.drift; syncUI(); };
 $('tColor').onclick = toggleColor;
 $('tMode').onclick = () => toggleModes();
 $('tPlay').onclick = togglePlay;
-$('tInfo').onclick = () => toggleInfo(true);
-$('infoClose').onclick = () => toggleInfo(false);
+$('tInfo').onclick = () => toggleInfo();
 $('info').addEventListener('click', e => { if (e.target.id === 'info') toggleInfo(false); });
 
 const bump = (k, d, lo, hi) => { P[k] = Math.max(lo, Math.min(hi, +(P[k] + d).toFixed(3))); dirty = true; readout(); };
