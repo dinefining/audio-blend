@@ -173,6 +173,13 @@ function draw() {
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   const pl = plot(), hair = 1 / DPR;
   if (E) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, pl.x, pl.y, pl.w, pl.h); drawMask(pl); }
+  if (E && E.range) {
+    // dim what's outside the loop range, and mark the range on the ruler
+    const x0 = pl.x + pl.w * E.range[0] / E.F, x1 = pl.x + pl.w * E.range[1] / E.F;
+    ctx.fillStyle = 'rgba(0,0,0,.62)'; ctx.fillRect(pl.x, pl.y, x0 - pl.x, pl.h); ctx.fillRect(x1, pl.y, pl.x + pl.w - x1, pl.h);
+    ctx.fillStyle = '#7c7c7c'; ctx.fillRect(x0, pl.y, hair, pl.h); ctx.fillRect(x1 - hair, pl.y, hair, pl.h);
+    ctx.fillStyle = '#fff'; ctx.fillRect(x0, pl.y + pl.h, x1 - x0, 2);
+  }
   ctx.strokeStyle = '#7c7c7c'; ctx.lineWidth = hair; ctx.strokeRect(pl.x - hair / 2, pl.y - hair / 2, pl.w + hair, pl.h + hair);
   ctx.fillStyle = '#9a9a9a'; ctx.font = `${W < 640 ? 10 : 11}px "JetBrains Mono", ui-monospace, monospace`; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
   [[100, '100'], [1000, '1k'], [10000, '10k']].forEach(([f, t]) => { const y = pl.y + pl.h * (1 - Math.log(f / FMIN) / Math.log(FMAX / FMIN)); ctx.fillText(t, pl.x - 8, y); ctx.fillRect(pl.x - 5, Math.round(y), 3, hair); });
@@ -193,7 +200,8 @@ function draw() {
     ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'; ctx.font = '11px "JetBrains Mono", ui-monospace, monospace'; ctx.fillText('B', bx, pl.y - 11.5);
     if (S.playing) {
       const lat = (AC.outputLatency || 0) + 4096 / AC.sampleRate;
-      const f = ((E.frame - lat * AC.sampleRate / HOP) % E.F + E.F) % E.F;
+      let f = ((E.frame - lat * AC.sampleRate / HOP) % E.F + E.F) % E.F;
+      if (E.range) { const [r0, r1] = E.range, n = r1 - r0; f = r0 + (((f - r0) % n) + n) % n; }
       ctx.fillStyle = '#fff'; ctx.fillRect(Math.round(pl.x + pl.w * f / E.F), pl.y, 1, pl.h);
     }
   }
@@ -459,9 +467,11 @@ function downloadLoop() {
   setTimeout(() => {
     // render the loop twice with a separate engine and keep the second pass, so the loop seam is already settled
     const R = makeEngine(E.SR); R.sources = E.sources; R.L = E.L; R.F = E.F; Object.assign(R.p, E.p); R.agc = E.agc; R.mask = E.mask;
-    const all = new Float32Array(E.L * 2);
+    // only the loop range, when one is set
+    R.range = E.range; R.frame = E.range ? E.range[0] : 0;
+    const len = E.range ? (E.range[1] - E.range[0]) * HOP : E.L, all = new Float32Array(len * 2);
     for (let i = 0; i < all.length; i += 2048) R.render(all.subarray(i, Math.min(all.length, i + 2048)));   // the engine's buffer holds 16k samples, so render in blocks
-    const out = all.slice(E.L); let pk = 0; for (const x of out) pk = Math.max(pk, Math.abs(x));
+    const out = all.slice(len); let pk = 0; for (const x of out) pk = Math.max(pk, Math.abs(x));
     if (pk > 0.98) for (let i = 0; i < out.length; i++) out[i] *= 0.98 / pk;
     saveBlob(wavBlob([out, out], E.SR), `audio-blend-${P.mode.replace(' ', '-')}-${stamp()}.wav`);
     say('Loop saved');
@@ -501,6 +511,7 @@ addEventListener('keydown', e => {
   else if (k === 's') swapAB();
   else if (k === '[' || k === ']') setBr(k === ']' ? 0.005 : -0.005);
   else if (k === 'l' || k === 'L') toggleOutline();
+  else if (k === 'r' || k === 'R') clearRange();
   else if (k === 'Backspace' || k === 'Delete') { e.preventDefault(); clearMask(); }
   else if (k === '0') { P.dt = 0; P.st = 0; dirty = true; readout(); }
   else if (k === '?') toggleInfo(true);
@@ -509,9 +520,24 @@ addEventListener('keydown', e => {
 });
 
 /* ───────── drag the picture to move B ───────── */
-let drag = null, lastTap = 0;
+let drag = null, lastTap = 0, lastRulerTap = 0;
+/* ───────── loop range: drag along the time ruler under the picture ───────── */
+const onRuler = (e, pl) => e.clientY >= pl.y + pl.h && e.clientX >= pl.x - 6 && e.clientX <= pl.x + pl.w + 6;
+const xToF = (x, pl) => Math.max(0, Math.min(E.F, Math.round((x - pl.x) / pl.w * E.F)));
+const sayRange = () => { const r = E.range, t = f => (f * HOP / E.SR).toFixed(2); say(r ? `Loop ${t(r[0])}–${t(r[1])} S` : 'Loop · full'); };
+const clearRange = () => { if (!E || !E.range) return; E.range = null; sayRange(); };
+const MIN_RANGE = 8;   // frames, about a tenth of a second
 cv.addEventListener('pointerdown', e => {
   if (e.button !== 0) return; if (!$('modeRow').hidden) toggleModes(false); if (S.pop) { S.pop = null; syncUI(); }
+  const pr = plot();
+  if (E && onRuler(e, pr)) {
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    const now = performance.now(); if (now - lastRulerTap < 300) { clearRange(); lastRulerTap = 0; return; } lastRulerTap = now;
+    const f = xToF(e.clientX, pr), R = E.range, near = 10 / pr.w * E.F;
+    // grab an existing edge to adjust it, otherwise start a new range
+    drag = R && Math.abs(f - R[0]) < near ? { ruler: true, anchor: R[1] } : R && Math.abs(f - R[1]) < near ? { ruler: true, anchor: R[0] } : { ruler: true, anchor: f };
+    return;
+  }
   const now = performance.now(); if (now - lastTap < 300) { P.dt = 0; P.st = 0; dirty = true; readout(); lastTap = 0; return; } lastTap = now;
   if (!E) return; e.preventDefault(); cv.setPointerCapture(e.pointerId);
   if (tool) { drag = { paint: true }; brushAt(e, true); return; }
@@ -519,7 +545,17 @@ cv.addEventListener('pointerdown', e => {
 });
 cv.addEventListener('pointermove', e => {
   if (tool) brush = { x: e.clientX, y: e.clientY };
-  if (!drag) return;
+  if (!drag) {
+    const r = E && onRuler(e, plot());
+    cv.style.cursor = r ? 'ew-resize' : tool ? 'crosshair' : 'grab';
+    if (r !== !!cv.ruler && e.pointerType === 'mouse') { cv.ruler = r; S.hint = r ? 'Drag to loop a range · double-click for full' : ''; readout(); }
+    return;
+  }
+  if (drag.ruler) {
+    const f = xToF(e.clientX, plot()), a = Math.min(drag.anchor, f), b = Math.max(drag.anchor, f);
+    if (b - a >= MIN_RANGE) { E.range = a === 0 && b === E.F ? null : [a, b]; sayRange(); }
+    return;
+  }
   if (drag.paint) { const ev = e.getCoalescedEvents ? e.getCoalescedEvents() : null; for (const ce of ev && ev.length ? ev : [e]) brushAt(ce); return; }
   const pl = plot();
   P.dt = (((drag.dt + (e.clientX - drag.x) / pl.w * E.F) % E.F) + E.F) % E.F;
@@ -527,7 +563,7 @@ cv.addEventListener('pointermove', e => {
   dirty = true; readout();
 });
 const endDrag = () => { if (drag && drag.paint && E.mask && !E.mask.some(v => v > 0.01)) { E.mask = null; maskVer++; mdirty = [0, MASK_W - 1]; } drag = null; lastStamp = null; cv.style.cursor = tool ? 'crosshair' : 'grab'; };
-cv.addEventListener('pointerleave', () => { brush = null; });
+cv.addEventListener('pointerleave', () => { brush = null; if (cv.ruler) { cv.ruler = false; S.hint = ''; readout(); } });
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
 
 /* ───────── audio ───────── */

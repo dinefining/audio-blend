@@ -216,7 +216,7 @@ const MASK_W = 256, MASK_H = 96, FMIN_M = 50, FMAX_M = 14000;
 function makeEngine(SR) {
   const L = Math.round(LOOP_SEC * SR / HOP) * HOP, F = L / HOP;
   const E = {
-    SR, L, F, sources: {}, frame: 0,
+    SR, L, F, sources: {}, frame: 0, range: null,
     p: { a: 'voice', b: 'rain', mode: 'multiply', op: 0.75, th: 0.725, dt: Math.round(F / 16), st: 0 },
     phi: new Float64Array(BINS), acc: new Float32Array(N), re: new Float64Array(N), im: new Float64Array(N),
     om: new Float32Array(BINS), fifo: new Float32Array(16384), fr: 0, fw: 0, agc: 1,
@@ -240,7 +240,7 @@ function makeEngine(SR) {
       for (let i = 0; i < Lnew + X; i++) raw[i] = y[i % n];
       srcs[id] = analyse(normalize(xfadeLoop(raw, Lnew, X)), Lnew);
     }
-    E.L = Lnew; E.F = Lnew / HOP; E.sources = srcs; E.frame %= E.F; E.p.dt = ((E.p.dt % E.F) + E.F) % E.F;
+    E.L = Lnew; E.F = Lnew / HOP; E.sources = srcs; E.frame %= E.F; if (E.range && E.range[1] > E.F) E.range = null; E.p.dt = ((E.p.dt % E.F) + E.F) % E.F;
   };
   // Value of layer B at frame f, bin position kb (fractional), after time offset and pitch shift.
   E.sampleB = (B, f, kb) => {
@@ -287,7 +287,9 @@ function makeEngine(SR) {
     for (let n = 0; n < N; n++) acc[n] += re[n] * WIN[n] / 1.5;
     for (let n = 0; n < HOP; n++) { E.fifo[E.fw] = acc[n]; E.fw = (E.fw + 1) % cap; }
     acc.copyWithin(0, HOP); acc.fill(0, N - HOP);
-    E.frame = (fi + 1) % F;
+    // with a loop range set, play only frames [range0, range1) and jump back at the end
+    const R = E.range, nf = fi + 1;
+    E.frame = R ? (nf >= R[1] || nf < R[0] ? R[0] : nf) : nf % F;
   };
   E.render = out => {
     const cap = E.fifo.length;
