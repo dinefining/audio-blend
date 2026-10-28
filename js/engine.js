@@ -209,9 +209,10 @@ function analyse(x, L) {
       ifq[i] = k + dd * back;
     }
   }
-  return { v, ifq, scale };
+  return { v, ifq, ph, mag, scale };
 }
 
+const MASK_W = 256, MASK_H = 96, FMIN_M = 50, FMAX_M = 14000;
 function makeEngine(SR) {
   const L = Math.round(LOOP_SEC * SR / HOP) * HOP, F = L / HOP;
   const E = {
@@ -220,6 +221,9 @@ function makeEngine(SR) {
     phi: new Float64Array(BINS), acc: new Float32Array(N), re: new Float64Array(N), im: new Float64Array(N),
     om: new Float32Array(BINS), fifo: new Float32Array(16384), fr: 0, fw: 0, agc: 1,
   };
+  E.mask = null;   // Float32Array(MASK_W * MASK_H), column-major: time columns, rows from high to low pitch
+  E.maskRow = new Int32Array(BINS);
+  for (let k = 0; k < BINS; k++) { const f = Math.max(FMIN_M, Math.min(FMAX_M, k * SR / N)); E.maskRow[k] = Math.max(0, Math.min(MASK_H - 1, Math.floor((1 - Math.log(f / FMIN_M) / Math.log(FMAX_M / FMIN_M)) * MASK_H))); }
   E.addSource = (id, x) => { E.sources[id] = analyse(x, E.L); };
   // The loop runs as long as the longer layer (up to 30 s); the shorter one repeats to fill it.
   E.MAX = Math.round(30 * SR / HOP) * HOP;
@@ -248,22 +252,32 @@ function makeEngine(SR) {
     const p = E.p, A = E.sources[p.a], B = E.sources[p.b], fi = E.frame, re = E.re, im = E.im, om = E.om;
     const F = E.F, ratio = Math.pow(2, p.st / 12), fb = (((fi - Math.round(p.dt)) % F) + F) % F, TW = 2 * Math.PI;
     let outE = 0, refE = 0;
+    const M = E.mask, mrow = E.maskRow, mcol = M ? Math.min(MASK_W - 1, Math.floor(fi / F * MASK_W)) * MASK_H : 0, solo = p.solo;
+    const sc = E.sc || (E.sc = new Float32Array(BINS));
     for (let k = 0; k < BINS; k++) {
       const a = A.v[fi * BINS + k], kb = k / ratio, b = E.sampleB(B, fi, kb);
-      const vo = p.solo === 'a' ? a : p.solo === 'b' ? b : blendValue(p, a, b);   // View A or B plays that layer alone
-      const m = vo < 0.004 ? 0 : Math.pow(10, (vo - 1) * DB / 20);
+      let vo;
+      if (solo === 'a') vo = a;
+      else if (solo === 'b') vo = b;
+      else { vo = blendValue(p, a, b); if (M) vo = a + (vo - a) * M[mcol + mrow[k]]; }   // painted mask: blend only where painted
+      let m = vo < 0.004 ? 0 : Math.pow(10, (vo - 1) * DB / 20);
       const i0 = Math.min(BINS - 1, Math.floor(kb));
-      const fq = (p.solo === 'a' || (p.solo !== 'b' && a >= b)) ? A.ifq[fi * BINS + k] : B.ifq[fb * BINS + i0] * ratio;
-      E.phi[k] += TW * fq * HOP / N; if (E.phi[k] > 1e4) E.phi[k] %= TW;
+      // Phase: reuse the original recording's phase from whichever layer dominates this bin, so unpitched sound is
+      // rebuilt exactly (no smear). Only a pitch-shifted B needs its phase re-synthesised.
+      const useA = solo === 'a' || (solo !== 'b' && a >= b);
+      // v is clipped to 0..1 for blending; rebuild from the layer's true magnitude, scaled by how far the blend moved it
+      if (useA) { E.phi[k] = A.ph[fi * BINS + k]; sc[k] = A.scale; if (a > 0.004) m = A.mag[fi * BINS + k] * A.scale * Math.pow(10, (vo - a) * DB / 20); }
+      else if (p.st === 0) { E.phi[k] = B.ph[fb * BINS + k]; sc[k] = B.scale; if (b > 0.004) m = B.mag[fb * BINS + k] * B.scale * Math.pow(10, (vo - b) * DB / 20); }
+      else { E.phi[k] += TW * B.ifq[fb * BINS + i0] * ratio * HOP / N; if (E.phi[k] > 1e4) E.phi[k] %= TW; sc[k] = B.scale; }
+      if (vo < 0.004) m = 0;
       om[k] = m; outE += m * m;
       if (a > 0.004) refE += Math.pow(10, (a - 1) * DB / 10);
       if (b > 0.004) refE += Math.pow(10, (b - 1) * DB / 10);
     }
-    // keep loudness steady across modes: quiet results are lifted, loud ones tamed
-    const want = outE > 1e-9 ? Math.max(0.25, Math.min(10, 0.75 * Math.sqrt(refE / outE))) : E.agc;
-    E.agc += (want - E.agc) * 0.05;
-    const g = E.agc * 2 / (A.scale + B.scale);
-    for (let k = 0; k < BINS; k++) { re[k] = om[k] * g * Math.cos(E.phi[k]); im[k] = om[k] * g * Math.sin(E.phi[k]); }
+    // solo plays at the recording's own level; blends keep loudness steady (quiet results lifted, loud ones tamed)
+    const want = solo ? 1 : outE > 1e-9 ? Math.max(0.25, Math.min(10, 0.75 * Math.sqrt(refE / outE))) : E.agc;
+    E.agc += (want - E.agc) * (solo ? 0.3 : 0.05);
+    for (let k = 0; k < BINS; k++) { const g = om[k] * E.agc / sc[k]; re[k] = g * Math.cos(E.phi[k]); im[k] = g * Math.sin(E.phi[k]); }
     im[0] = 0; im[N / 2] = 0;
     for (let k = 1; k < N / 2; k++) { re[N - k] = re[k]; im[N - k] = -im[k]; }
     fft(re, im, true);

@@ -26,6 +26,10 @@ const ICON = {
   rec: svg(14, 14, '<circle class="red" cx="7" cy="7" r="6.5"/>'),
   recStop: svg(12, 12, '<rect class="red" x="0" y="0" width="12" height="12"/>'),
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
+  swap: svg(14, 14, '<path class="s" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
+  mask: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5"/><circle class="f" cx="10" cy="7" r="3.6"/>'),
+  paint: svg(14, 14, '<circle class="f" cx="7" cy="7" r="6"/>'),
+  erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="6"/>'),
   download: svg(14, 16, '<path class="s" d="M7 1.5 V11 M3 7 L7 11 L11 7 M1 14.5 H13"/>'),
 };
 function venn(op) {
@@ -43,7 +47,7 @@ const modeGlyph = m => BOOL[m] ? venn(m) : `<span class="lt">${ABBR[m]}</span>`;
 /* ───────── state ───────── */
 let AC = null, E = null, master = null;
 const S = { playing: false, ready: false, drift: false, color: false, view: 'out', hint: '', note: '', loading: {}, pop: null };
-let rec = null, sess = null;
+let rec = null, sess = null, tool = null, brush = null;
 let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 };
 
 /* ───────── tile row ───────── */
@@ -55,33 +59,44 @@ const CELLS = [
   ['tDrift', 'Drift', ''],
   ['tColor', 'Colour', ''],
   ['tMode', 'Modes', ''],
+  ['tMask', 'Mask', ''],
   ['tMix', '', '<span class="fill" id="fMix"></span><span class="v" id="vMix"></span>'],
   ['tExp', 'Export', '<span class="lt" id="vExp">EXP</span>'],
 ];
 const popFor = l => `<div class="pop" id="pop${l}" hidden>
   <button class="t" id="rec${l}" type="button" data-hint="Record ${l}"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
-  <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button></div>`;
+  <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button>
+  <button class="t sw" type="button" data-hint="Swap A and B">${ICON.swap}</button></div>`;
+const popMask = `<div class="pop" id="popM" hidden>
+  <button class="t" id="mPaint" type="button" data-hint="Paint mask · blend only where painted">${ICON.paint}</button>
+  <button class="t" id="mErase" type="button" data-hint="Erase mask">${ICON.erase}</button>
+  <button class="t" id="mClear" type="button" data-hint="Clear mask"><span class="lt">CLR</span></button></div>`;
 const popExp = `<div class="pop" id="popX" hidden>
   <button class="t" id="recX" type="button" data-hint="Record session · tap again to stop and save"></button>
   <button class="t" id="dlX" type="button" data-hint="Download loop as WAV">${ICON.download}</button></div>`;
-$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : id === 'tExp' ? popExp : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
+$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : id === 'tExp' ? popExp : id === 'tMask' ? popMask : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
 $('stage').appendChild($('info'));   // same layer as the tiles, so the ? can sit above the panel and become its close button
 
 /* ───────── canvas ───────── */
 const cv = $('cv'), ctx = cv.getContext('2d'), ov = $('ov');
 const img = document.createElement('canvas'), ix = img.getContext('2d');
-const COLS = 520, ROWS = 260, FMIN = 50, FMAX = 14000;
-img.width = COLS; img.height = ROWS;
-const imgData = ix.createImageData(COLS, ROWS);
-const grain = new Float32Array(COLS * ROWS); { const r = rng(99); for (let i = 0; i < grain.length; i++) grain[i] = r() + r() - 1; }
-let W = 1, H = 1, DPR = 1, rowBin = null, dirty = true;
+const FMIN = 50, FMAX = 14000;
+let COLS = 0, ROWS = 0, imgData = null, grain = null;
+// one image pixel per ~2 screen pixels: fine grain rather than visible blocks
+function sizeImage(pl) {
+  const c = Math.max(200, Math.min(1100, Math.round(pl.w * DPR / 2))), r = Math.max(120, Math.min(640, Math.round(pl.h * DPR / 2)));
+  if (c === COLS && r === ROWS) return;
+  COLS = c; ROWS = r; img.width = COLS; img.height = ROWS; imgData = ix.createImageData(COLS, ROWS); rowBin = null;
+  grain = new Float32Array(COLS * ROWS); const g = rng(99); for (let i = 0; i < grain.length; i++) grain[i] = g() + g() - 1;
+}
+var W = 1, H = 1, DPR = 1, rowBin = null, dirty = true;
 let PADL = 44, PADB = 26, PADT = 10, PADR = 10;
 const plot = () => ({ x: PADL, y: PADT, w: Math.max(10, W - PADL - PADR), h: Math.max(10, H - PADT - PADB) });
 function resize() {
   W = innerWidth; H = innerHeight; DPR = Math.min(devicePixelRatio || 1, 2);
   const narrow = W < 640; PADL = narrow ? 30 : 40; PADB = narrow ? 20 : 24; PADT = narrow ? 22 : 26; PADR = narrow ? 6 : 10;
   cv.width = W * DPR; cv.height = H * DPR;
-  const pl = plot();
+  const pl = plot(); sizeImage(pl);
   Object.assign(ov.style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
   if (narrow) {
     const n = $('mainRow').children.length, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
@@ -112,7 +127,8 @@ function computeImage() {
       const kb = rowBin[r], k0 = Math.min(BINS - 2, Math.floor(kb)), fr = kb - k0;
       const a = A.v[f * BINS + k0] * (1 - fr) + A.v[f * BINS + k0 + 1] * fr;
       const b = E.sampleB(B, f, kb / ratio);
-      const v = S.view === 'a' ? a : S.view === 'b' ? b : blendValue(P, a, b);
+      let v = S.view === 'a' ? a : S.view === 'b' ? b : blendValue(P, a, b);
+      if (E.mask && S.view === 'out') v = a + (v - a) * E.mask[Math.min(MASK_W - 1, Math.floor(c / COLS * MASK_W)) * MASK_H + Math.min(MASK_H - 1, Math.floor(r / ROWS * MASK_H))];
       const wa = S.view === 'a' ? 1 : S.view === 'b' ? 0 : (a + 1e-4) / (a + b + 2e-4);
       const i = r * COLS + c;
       paint(d, i * 4, v, wa, grain[i]);
@@ -142,7 +158,7 @@ function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   const pl = plot(), hair = 1 / DPR;
-  if (E) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, pl.x, pl.y, pl.w, pl.h); }
+  if (E) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, pl.x, pl.y, pl.w, pl.h); drawMask(pl); }
   ctx.strokeStyle = '#7c7c7c'; ctx.lineWidth = hair; ctx.strokeRect(pl.x - hair / 2, pl.y - hair / 2, pl.w + hair, pl.h + hair);
   ctx.fillStyle = '#9a9a9a'; ctx.font = `${W < 640 ? 10 : 11}px "JetBrains Mono", ui-monospace, monospace`; ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
   [[100, '100'], [1000, '1k'], [10000, '10k']].forEach(([f, t]) => { const y = pl.y + pl.h * (1 - Math.log(f / FMIN) / Math.log(FMAX / FMIN)); ctx.fillText(t, pl.x - 8, y); ctx.fillRect(pl.x - 5, Math.round(y), 3, hair); });
@@ -192,6 +208,8 @@ function syncUI() {
   $('tDrift').innerHTML = ICON.drift; $('tDrift').classList.toggle('on', S.drift);
   $('tColor').innerHTML = `<span class="lt">${S.color ? 'COL' : 'BW'}</span>`;
   $('tMode').innerHTML = modeGlyph(P.mode); $('tMode').classList.toggle('on', !$('modeRow').hidden);
+  $('popM').hidden = S.pop !== 'M'; $('tMask').innerHTML = ICON.mask; $('tMask').classList.toggle('on', S.pop === 'M' || !!tool);
+  $('mPaint').classList.toggle('on', tool === 'paint'); $('mErase').classList.toggle('on', tool === 'erase');
   $('popX').hidden = S.pop !== 'X'; $('tExp').classList.toggle('on', S.pop === 'X');
   $('recX').innerHTML = sess ? ICON.recStop : ICON.rec; $('tExp').classList.toggle('recording', !!sess);
   ['A', 'B'].forEach(l => { $('pop' + l).hidden = S.pop !== l; $('t' + l).classList.toggle('on', S.pop === l); $('rec' + l).querySelectorAll('svg').forEach(n => n.remove()); $('rec' + l).insertAdjacentHTML('beforeend', rec && rec.layer === l ? ICON.recStop : ICON.rec); });
@@ -217,7 +235,7 @@ const toggleModes = force => { const p = $('modeRow'); p.hidden = typeof force =
 document.addEventListener('pointerdown', e => {
   const t = e.target.closest('.t');
   let changed = false;
-  if (S.pop && !(t && (t.id === (S.pop === 'X' ? 'tExp' : 't' + S.pop) || t.closest('#pop' + S.pop)))) { S.pop = null; changed = true; }
+  if (S.pop && !(t && (t.id === ({ X: 'tExp', M: 'tMask' }[S.pop] || 't' + S.pop) || t.closest('#pop' + S.pop)))) { S.pop = null; changed = true; }
   if (!$('modeRow').hidden && !(t && (t.id === 'tMode' || t.closest('#modeRow')))) { $('modeRow').hidden = true; changed = true; }
   if (changed) syncUI();
 }, true);
@@ -331,6 +349,40 @@ const cycleView = () => { S.view = VIEWS[(VIEWS.indexOf(S.view) + 1) % 3]; dirty
 const toggleColor = () => { S.color = !S.color; dirty = true; if (E) { thumb('A'); thumb('B'); } syncUI(); };
 $('tView').onclick = cycleView;
 $('tExp').onclick = () => togglePop('X');
+$('tMask').onclick = () => { if (tool && S.pop !== 'M') { tool = null; syncUI(); } else togglePop('M'); };
+const setTool = t => { tool = tool === t ? null : t; S.pop = null; syncUI(); };
+$('mPaint').onclick = () => setTool('paint');
+$('mErase').onclick = () => setTool('erase');
+$('mClear').onclick = () => { if (E) E.mask = null; tool = null; S.pop = null; dirty = true; syncUI(); say('Mask cleared'); };
+document.querySelectorAll('.t.sw').forEach(b => b.onclick = swapAB);
+function swapAB() {
+  if (!E) return;
+  [E.sources.A, E.sources.B] = [E.sources.B, E.sources.A]; [E.raw.A, E.raw.B] = [E.raw.B, E.raw.A];
+  thumb('A'); thumb('B'); S.pop = null; dirty = true; syncUI(); say('A ⇄ B');
+}
+
+/* ───────── mask: painted on the picture, stored as a coarse time × pitch grid ───────── */
+const maskImg = document.createElement('canvas'); maskImg.width = MASK_W; maskImg.height = MASK_H;
+function brushAt(e) {
+  const pl = plot(), cx = (e.clientX - pl.x) / pl.w * MASK_W, cy = (e.clientY - pl.y) / pl.h * MASK_H;
+  const rx = 0.045 * MASK_W * (pl.h / pl.w > 1 ? 1.6 : 1), ry = rx * (pl.w / pl.h) * (MASK_H / MASK_W);
+  if (!E.mask) E.mask = new Float32Array(MASK_W * MASK_H);
+  const M = E.mask, on = tool === 'paint';
+  for (let c = Math.max(0, Math.floor(cx - rx)); c <= Math.min(MASK_W - 1, Math.ceil(cx + rx)); c++)
+    for (let r = Math.max(0, Math.floor(cy - ry)); r <= Math.min(MASK_H - 1, Math.ceil(cy + ry)); r++) {
+      const d = Math.hypot((c + 0.5 - cx) / rx, (r + 0.5 - cy) / ry); if (d > 1) continue;
+      const w = Math.min(1, (1 - d) * 2.5), i = c * MASK_H + r;
+      M[i] = on ? Math.max(M[i], w) : Math.min(M[i], 1 - w);
+    }
+  dirty = true;
+}
+function drawMask(pl) {
+  if (brush && tool) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(brush.x, brush.y, 0.045 * pl.w * (pl.h / pl.w > 1 ? 1.6 : 1), 0, 7); ctx.stroke(); }
+  if (!E.mask || S.view !== 'out') return;
+  const mx = maskImg.getContext('2d'), id = mx.createImageData(MASK_W, MASK_H);
+  for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) { const i = (r * MASK_W + c) * 4; id.data[i] = id.data[i + 1] = id.data[i + 2] = 255; id.data[i + 3] = E.mask[c * MASK_H + r] * (tool ? 22 : 0); }
+  mx.putImageData(id, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(maskImg, pl.x, pl.y, pl.w, pl.h); ctx.imageSmoothingEnabled = false;
+}
 $('dlX').onclick = downloadLoop;
 $('recX').onclick = () => sess ? stopSession() : startSession();
 
@@ -354,7 +406,7 @@ function downloadLoop() {
   say('Rendering loop…');
   setTimeout(() => {
     // render the loop twice with a separate engine and keep the second pass, so the loop seam is already settled
-    const R = makeEngine(E.SR); R.sources = E.sources; R.L = E.L; R.F = E.F; Object.assign(R.p, E.p); R.agc = E.agc;
+    const R = makeEngine(E.SR); R.sources = E.sources; R.L = E.L; R.F = E.F; Object.assign(R.p, E.p); R.agc = E.agc; R.mask = E.mask;
     const all = new Float32Array(E.L * 2);
     for (let i = 0; i < all.length; i += 2048) R.render(all.subarray(i, Math.min(all.length, i + 2048)));   // the engine's buffer holds 16k samples, so render in blocks
     const out = all.slice(E.L); let pk = 0; for (const x of out) pk = Math.max(pk, Math.abs(x));
@@ -386,7 +438,7 @@ const nudgeT = d => { if (!E) return; P.dt = (((P.dt + d) % E.F) + E.F) % E.F; d
 addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
-  if (k === 'Escape') { toggleInfo(false); toggleModes(false); S.pop = null; syncUI(); return; }
+  if (k === 'Escape') { toggleInfo(false); toggleModes(false); S.pop = null; tool = null; syncUI(); return; }
   if (!$('info').hidden) return;
   if (e.target instanceof HTMLButtonElement && (k === ' ' || k === 'Enter')) return;
   if (k === ' ') { e.preventDefault(); togglePlay(); }
@@ -395,6 +447,7 @@ addEventListener('keydown', e => {
   else if (k === 'o') setMix(-0.1); else if (k === 'O') setMix(0.1);
   else if (k === 'v') cycleView();
   else if (k === 'c') toggleColor();
+  else if (k === 's') swapAB();
   else if (k === 'd') { S.drift = !S.drift; syncUI(); }
   else if (k === '0') { P.dt = 0; P.st = 0; dirty = true; readout(); }
   else if (k === '?') toggleInfo(true);
@@ -408,15 +461,18 @@ cv.addEventListener('pointerdown', e => {
   if (e.button !== 0) return; if (!$('modeRow').hidden) toggleModes(false); if (S.pop) { S.pop = null; syncUI(); }
   const now = performance.now(); if (now - lastTap < 300) { P.dt = 0; P.st = 0; dirty = true; readout(); lastTap = 0; return; } lastTap = now;
   if (!E) return; e.preventDefault(); cv.setPointerCapture(e.pointerId);
+  if (tool) { drag = { paint: true }; brushAt(e); return; }
   drag = { x: e.clientX, y: e.clientY, dt: P.dt, st: P.st }; cv.style.cursor = 'grabbing';
 });
 cv.addEventListener('pointermove', e => {
-  if (!drag) return; const pl = plot();
+  if (tool) brush = { x: e.clientX, y: e.clientY };
+  if (!drag) return; if (drag.paint) { brushAt(e); return; } const pl = plot();
   P.dt = (((drag.dt + (e.clientX - drag.x) / pl.w * E.F) % E.F) + E.F) % E.F;
   P.st = Math.max(-12, Math.min(12, Math.round(drag.st - (e.clientY - drag.y) * 12 * Math.log2(FMAX / FMIN) / pl.h)));
   dirty = true; readout();
 });
-const endDrag = () => { drag = null; cv.style.cursor = 'grab'; };
+const endDrag = () => { if (drag && drag.paint && E.mask && !E.mask.some(v => v > 0.01)) E.mask = null; drag = null; cv.style.cursor = tool ? 'crosshair' : 'grab'; };
+cv.addEventListener('pointerleave', () => { brush = null; });
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
 
 /* ───────── audio ───────── */
