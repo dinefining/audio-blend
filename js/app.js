@@ -429,12 +429,9 @@ async function boot() {
   Object.assign(eng.p, P); P = eng.p; E = eng;
   master = AC.createGain(); master.gain.value = 0;
   const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6; comp.attack.value = 0.004; comp.release.value = 0.2;
-  const verb = AC.createConvolver(), len = Math.floor(AC.sampleRate * 2.4), ir = AC.createBuffer(2, len, AC.sampleRate);
-  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5); }
-  verb.buffer = ir;
-  const dry = AC.createGain(), wet = AC.createGain(); dry.gain.value = 0.9; wet.gain.value = 0.18;
-  master.connect(dry); dry.connect(comp); master.connect(verb); verb.connect(wet); wet.connect(comp); comp.connect(AC.destination);
-  // session recorder taps the final mix, reverb and all
+  // no reverb: the mix goes straight to a gentle limiter so loud blends don't clip
+  master.connect(comp); comp.connect(AC.destination);
+  // session recorder taps the final mix
   const tap = AC.createScriptProcessor(4096, 2, 2), sink = AC.createGain(); sink.gain.value = 0;
   tap.onaudioprocess = ev => { if (!sess) return; const b = ev.inputBuffer; sess.l.push(b.getChannelData(0).slice()); sess.r.push(b.getChannelData(1).slice()); sess.n += b.length; };
   comp.connect(tap); tap.connect(sink); sink.connect(AC.destination);
