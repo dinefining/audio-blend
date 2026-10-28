@@ -20,14 +20,13 @@ const svg = (w, h, body) => `<svg style="--iw:${w}px;--ih:${h}px" viewBox="0 0 $
 const ICON = {
   play: svg(12, 14, '<path class="f" d="M1 0.5 L11.5 7 L1 13.5 Z"/>'),
   stop: svg(12, 12, '<rect class="f" x="0" y="0" width="12" height="12"/>'),
-  drift: svg(22, 12, '<path class="s" d="M1 6 C 4 -1.5, 7 -1.5, 11 6 S 18 13.5, 21 6"/>'),
   eye: svg(22, 14, '<path class="s" d="M1 7 C 5 1, 17 1, 21 7 C 17 13, 5 13, 1 7 Z"/><circle class="f" cx="11" cy="7" r="2.6"/>'),
   cross: svg(14, 14, '<path class="s" d="M1 1 L13 13 M13 1 L1 13"/>'),
   rec: svg(14, 14, '<circle class="red" cx="7" cy="7" r="6.5"/>'),
   recStop: svg(12, 12, '<rect class="red" x="0" y="0" width="12" height="12"/>'),
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
   swap: svg(14, 14, '<path class="s" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
-  mask: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5"/><circle class="f" cx="10" cy="7" r="3.6"/>'),
+  mask: svg(20, 14, '<rect class="ln" x="0.5" y="0.5" width="19" height="13"/><circle class="f" cx="10" cy="7" r="3.6"/>'),
   paint: svg(14, 14, '<circle class="f" cx="7" cy="7" r="6"/>'),
   erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="6"/>'),
   download: svg(14, 16, '<path class="s" d="M7 1.5 V11 M3 7 L7 11 L11 7 M1 14.5 H13"/>'),
@@ -46,7 +45,7 @@ const modeGlyph = m => BOOL[m] ? venn(m) : `<span class="lt">${ABBR[m]}</span>`;
 
 /* ───────── state ───────── */
 let AC = null, E = null, master = null;
-const S = { playing: false, ready: false, drift: false, color: false, view: 'out', hint: '', note: '', loading: {}, pop: null };
+const S = { playing: false, ready: false, color: false, view: 'out', hint: '', note: '', loading: {}, pop: null };
 let rec = null, sess = null, tool = null, brush = null;
 let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 };
 
@@ -56,7 +55,6 @@ const CELLS = [
   ['tA', 'Layer A', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
   ['tB', 'Layer B', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
   ['tView', 'A ƒ B · result, A solo or B solo', ''],
-  ['tDrift', 'Drift', ''],
   ['tColor', 'Colour', ''],
   ['tMode', 'Modes', ''],
   ['tMask', 'Mask', ''],
@@ -145,7 +143,6 @@ function thumb(layer) {
 }
 
 function draw() {
-  if (S.drift && E && S.playing) { P.dt = (P.dt + 0.25) % E.F; dirty = true; readout(); }
   if (rec && E) {
     $('fRec' + rec.layer).style.height = `${rec.n / E.MAX * 100}%`;
     S.note = `Recording ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} s`; readout();
@@ -205,7 +202,6 @@ function syncUI() {
   $('tView').innerHTML = `<span class="lt">${S.view === 'out' ? 'A<span class="fn">ƒ</span>B' : S.view.toUpperCase()}</span>`;
   $('tView').classList.toggle('on', S.view !== 'out');
   P.solo = S.view === 'out' ? null : S.view;
-  $('tDrift').innerHTML = ICON.drift; $('tDrift').classList.toggle('on', S.drift);
   $('tColor').innerHTML = `<span class="lt">${S.color ? 'COL' : 'BW'}</span>`;
   $('tMode').innerHTML = modeGlyph(P.mode); $('tMode').classList.toggle('on', !$('modeRow').hidden);
   $('popM').hidden = S.pop !== 'M'; $('tMask').innerHTML = ICON.mask; $('tMask').classList.toggle('on', S.pop === 'M' || !!tool);
@@ -382,6 +378,16 @@ function drawMask(pl) {
   const mx = maskImg.getContext('2d'), id = mx.createImageData(MASK_W, MASK_H);
   for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) { const i = (r * MASK_W + c) * 4; id.data[i] = id.data[i + 1] = id.data[i + 2] = 255; id.data[i + 3] = E.mask[c * MASK_H + r] * (tool ? 22 : 0); }
   mx.putImageData(id, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(maskImg, pl.x, pl.y, pl.w, pl.h); ctx.imageSmoothingEnabled = false;
+  // outline: a dot on every grid edge where painted meets unpainted, which reads as a dotted line
+  const M = E.mask, cw = pl.w / MASK_W, rh = pl.h / MASK_H, on = (c, r) => c >= 0 && c < MASK_W && r >= 0 && r < MASK_H && M[c * MASK_H + r] > 0.5;
+  ctx.fillStyle = '#ffd23f';
+  for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) {
+    if (!on(c, r)) continue;
+    if (!on(c - 1, r)) ctx.fillRect(Math.round(pl.x + c * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
+    if (!on(c + 1, r)) ctx.fillRect(Math.round(pl.x + (c + 1) * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
+    if (!on(c, r - 1)) ctx.fillRect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + r * rh) - 1, 2, 2);
+    if (!on(c, r + 1)) ctx.fillRect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + (r + 1) * rh) - 1, 2, 2);
+  }
 }
 $('dlX').onclick = downloadLoop;
 $('recX').onclick = () => sess ? stopSession() : startSession();
@@ -426,7 +432,6 @@ function stopSession() {
   saveBlob(wavBlob([join(s2.l), join(s2.r)], AC.sampleRate), `audio-blend-session-${stamp()}.wav`);
   say(`Session saved · ${(s2.n / AC.sampleRate).toFixed(1)} s`);
 }
-$('tDrift').onclick = () => { S.drift = !S.drift; syncUI(); };
 $('tColor').onclick = toggleColor;
 $('tMode').onclick = () => toggleModes();
 $('tPlay').onclick = togglePlay;
@@ -448,7 +453,6 @@ addEventListener('keydown', e => {
   else if (k === 'v') cycleView();
   else if (k === 'c') toggleColor();
   else if (k === 's') swapAB();
-  else if (k === 'd') { S.drift = !S.drift; syncUI(); }
   else if (k === '0') { P.dt = 0; P.st = 0; dirty = true; readout(); }
   else if (k === '?') toggleInfo(true);
   else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); if (E) nudgeT((k === 'ArrowRight' ? 1 : -1) * E.F / (e.shiftKey ? 32 : 160)); }
