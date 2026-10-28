@@ -25,7 +25,8 @@ const ICON = {
   rec: svg(14, 14, '<circle class="red" cx="7" cy="7" r="6.5"/>'),
   recStop: svg(12, 12, '<rect class="red" x="0" y="0" width="12" height="12"/>'),
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
-  swap: svg(14, 14, '<path class="s" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
+  // the swap arrows turned on their side: they point at A and B on either side of the tile
+  swap: svg(14, 14, '<path class="s" transform="rotate(90 7 7)" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
   mask: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5"/><circle class="f" cx="10" cy="7" r="3"/>'),
   paint: svg(14, 14, '<circle class="f" cx="7" cy="7" r="6"/>'),
   erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="5.25"/>'),   // ring drawn inside, so its outer edge matches the paint dot
@@ -54,6 +55,7 @@ let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 }
 const CELLS = [
   ['tPlay', 'Play / Stop', ''],
   ['tA', 'Layer A', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
+  ['tSw', 'Swap A and B', ICON.swap],
   ['tB', 'Layer B', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
   ['tView', 'A ƒ B · result, A solo or B solo', ''],
   ['tColor', 'Colour', ''],
@@ -65,7 +67,7 @@ const CELLS = [
 const popFor = l => `<div class="pop" id="pop${l}" hidden>
   <button class="t" id="rec${l}" type="button" data-hint="Record ${l}"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
   <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button>
-  <button class="t sw" type="button" data-hint="Swap A and B">${ICON.swap}</button></div>`;
+</div>`;
 const popMask = `<div class="pop" id="popM" hidden>
   <button class="t" id="mPaint" type="button" data-hint="Paint mask · blend only where painted">${ICON.paint}</button>
   <button class="t" id="mErase" type="button" data-hint="Erase mask">${ICON.erase}</button>
@@ -73,7 +75,7 @@ const popMask = `<div class="pop" id="popM" hidden>
 const popExp = `<div class="pop" id="popX" hidden>
   <button class="t" id="recX" type="button" data-hint="Record session · tap again to stop and save"></button>
   <button class="t" id="dlX" type="button" data-hint="Download loop as WAV">${ICON.download}</button></div>`;
-$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : id === 'tExp' ? popExp : id === 'tMask' ? popMask : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
+$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell${id === 'tSw' ? ' mob' : ''}">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : id === 'tExp' ? popExp : id === 'tMask' ? popMask : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
 $('stage').appendChild($('info'));   // same layer as the tiles, so the ? can sit above the panel and become its close button
 
 /* ───────── canvas ───────── */
@@ -98,7 +100,7 @@ function resize() {
   const pl = plot(); sizeImage(pl);
   Object.assign(ov.style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
   if (narrow) {
-    const n = $('mainRow').children.length, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
+    const n = [...$('mainRow').children].filter(c => getComputedStyle(c).display !== 'none').length, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
     document.documentElement.style.setProperty('--tile', t + 'px');
     document.documentElement.style.setProperty('--k', (t / 44).toFixed(3));
     document.documentElement.style.setProperty('--edge', Math.floor((Math.floor(pl.w) - n * t - (n - 1) * g) / 2) + 'px');
@@ -370,7 +372,7 @@ const setBr = d => { if (!br) br = brDefault(); br = Math.max(BR_MIN, Math.min(B
 // while painting, the scroll wheel also resizes the brush
 cv.addEventListener('wheel', e => { if (!tool) return; e.preventDefault(); setBr(-Math.sign(e.deltaY) * 0.005); }, { passive: false });
 const clearMask = () => { if (!E || !E.mask) return; E.mask = null; maskVer++; mdirty = [0, MASK_W - 1]; say('Mask cleared'); };
-document.querySelectorAll('.t.sw').forEach(b => b.onclick = swapAB);
+$('tSw').onclick = swapAB;
 function swapAB() {
   if (!E) return;
   [E.sources.A, E.sources.B] = [E.sources.B, E.sources.A]; [E.raw.A, E.raw.B] = [E.raw.B, E.raw.A];
@@ -395,7 +397,8 @@ function stamp1(cx, cy, rx, ry) {
 function brushAt(e, first) {
   const pl = plot(), cx = (e.clientX - pl.x) / pl.w * MASK_W, cy = (e.clientY - pl.y) / pl.h * MASK_H;
   const rx = br * MASK_W, ry = br * pl.w / pl.h * MASK_H;
-  if (!E.mask) E.mask = new Float32Array(MASK_W * MASK_H);
+  // a new mask turns everything outside it back to A, so the whole picture is redrawn once
+  if (!E.mask) { E.mask = new Float32Array(MASK_W * MASK_H); mdirty = [0, MASK_W - 1]; }
   const p0 = first || !lastStamp ? { x: cx, y: cy } : lastStamp;
   const n = Math.max(1, Math.ceil(Math.hypot((cx - p0.x) / rx, (cy - p0.y) / ry) * 4));
   for (let s = first ? 0 : 1; s <= n; s++) stamp1(p0.x + (cx - p0.x) * s / n, p0.y + (cy - p0.y) * s / n, rx, ry);

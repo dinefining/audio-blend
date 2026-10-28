@@ -39,6 +39,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .row, .mrow { display: flex; flex-wrap: wrap; gap: var(--gap); pointer-events: auto; }
 #modeRow { display: flex; flex-direction: column; gap: var(--gap); pointer-events: auto; }
 .cell { position: relative; }
+.cell.mob { display: none; }
 .pop { position: absolute; left: 0; bottom: calc(100% + var(--gap)); display: flex; flex-direction: column; gap: var(--gap); }
 #tInfo { position: absolute; right: var(--edge); top: var(--edge); pointer-events: auto; z-index: 60; }
 
@@ -110,4 +111,5 @@ body.col #tB .lt { color: var(--b); }
   /* a float the size of the close tile's corner: the heading wraps around it, every line below runs the full width */
   #info .xs { display: block; width: calc(var(--edge) + var(--tile) - var(--pad) + 10px); height: calc(var(--edge) + var(--tile) - var(--pad) + 4px); }
   #r2 { display: none; }
+  .cell.mob { display: block; }
 }
