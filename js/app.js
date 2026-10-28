@@ -26,9 +26,10 @@ const ICON = {
   recStop: svg(12, 12, '<rect class="red" x="0" y="0" width="12" height="12"/>'),
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
   swap: svg(14, 14, '<path class="s" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
-  mask: svg(20, 14, '<rect class="ln" x="0.5" y="0.5" width="19" height="13"/><circle class="f" cx="10" cy="7" r="3.6"/>'),
+  mask: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5"/><circle class="f" cx="10" cy="7" r="3"/>'),
+  outline: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5" stroke-dasharray="1.5 2.5"/>'),
   paint: svg(14, 14, '<circle class="f" cx="7" cy="7" r="6"/>'),
-  erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="6"/>'),
+  erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="5.25"/>'),   // ring drawn inside, so its outer edge matches the paint dot
   download: svg(14, 16, '<path class="s" d="M7 1.5 V11 M3 7 L7 11 L11 7 M1 14.5 H13"/>'),
 };
 function venn(op) {
@@ -46,7 +47,8 @@ const modeGlyph = m => BOOL[m] ? venn(m) : `<span class="lt">${ABBR[m]}</span>`;
 /* ───────── state ───────── */
 let AC = null, E = null, master = null;
 const S = { playing: false, ready: false, color: false, view: 'out', hint: '', note: '', loading: {}, pop: null };
-let rec = null, sess = null, tool = null, brush = null;
+let rec = null, sess = null, tool = null, brush = null, br = 0, outline = true;
+const BR_MIN = 0.01, BR_MAX = 0.2, brDefault = () => (innerHeight > innerWidth ? 0.07 : 0.045);
 let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 };
 
 /* ───────── tile row ───────── */
@@ -68,6 +70,8 @@ const popFor = l => `<div class="pop" id="pop${l}" hidden>
 const popMask = `<div class="pop" id="popM" hidden>
   <button class="t" id="mPaint" type="button" data-hint="Paint mask · blend only where painted">${ICON.paint}</button>
   <button class="t" id="mErase" type="button" data-hint="Erase mask">${ICON.erase}</button>
+  <button class="t" id="mSize" type="button" data-hint="Brush size · drag up or down"><span class="fill" id="fSize"></span><span class="v" id="vSize"></span></button>
+  <button class="t" id="mLine" type="button" data-hint="Show or hide the mask outline">${ICON.outline}</button>
   <button class="t" id="mClear" type="button" data-hint="Clear mask"><span class="lt">CLR</span></button></div>`;
 const popExp = `<div class="pop" id="popX" hidden>
   <button class="t" id="recX" type="button" data-hint="Record session · tap again to stop and save"></button>
@@ -205,6 +209,8 @@ function syncUI() {
   $('tColor').innerHTML = `<span class="lt">${S.color ? 'COL' : 'BW'}</span>`;
   $('tMode').innerHTML = modeGlyph(P.mode); $('tMode').classList.toggle('on', !$('modeRow').hidden);
   $('popM').hidden = S.pop !== 'M'; $('tMask').innerHTML = ICON.mask; $('tMask').classList.toggle('on', S.pop === 'M' || !!tool);
+  if (!br) br = brDefault();
+  $('vSize').textContent = Math.round(br * 100); $('fSize').style.height = `${(br - BR_MIN) / (BR_MAX - BR_MIN) * 100}%`; $('mLine').classList.toggle('on', outline);
   $('mPaint').classList.toggle('on', tool === 'paint'); $('mErase').classList.toggle('on', tool === 'erase');
   $('popX').hidden = S.pop !== 'X'; $('tExp').classList.toggle('on', S.pop === 'X');
   $('recX').innerHTML = sess ? ICON.recStop : ICON.rec; $('tExp').classList.toggle('recording', !!sess);
@@ -349,6 +355,17 @@ $('tMask').onclick = () => { if (tool && S.pop !== 'M') { tool = null; syncUI();
 const setTool = t => { tool = tool === t ? null : t; S.pop = null; syncUI(); };
 $('mPaint').onclick = () => setTool('paint');
 $('mErase').onclick = () => setTool('erase');
+$('mLine').onclick = () => { outline = !outline; syncUI(); };
+const setBr = d => { br = Math.max(BR_MIN, Math.min(BR_MAX, br + d)); syncUI(); };
+{
+  const el = $('mSize'); let st = null;
+  el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); st = { y: e.clientY }; });
+  el.addEventListener('pointermove', e => { if (!st) return; setBr((st.y - e.clientY) / 140 * (BR_MAX - BR_MIN)); st.y = e.clientY; });
+  el.addEventListener('pointerup', () => { st = null; }); el.addEventListener('pointercancel', () => { st = null; });
+  el.addEventListener('wheel', e => { e.preventDefault(); setBr(-Math.sign(e.deltaY) * 0.005); }, { passive: false });
+}
+// while painting, the scroll wheel and [ ] also resize the brush
+cv.addEventListener('wheel', e => { if (!tool) return; e.preventDefault(); setBr(-Math.sign(e.deltaY) * 0.005); }, { passive: false });
 $('mClear').onclick = () => { if (E) E.mask = null; tool = null; S.pop = null; dirty = true; syncUI(); say('Mask cleared'); };
 document.querySelectorAll('.t.sw').forEach(b => b.onclick = swapAB);
 function swapAB() {
@@ -361,7 +378,7 @@ function swapAB() {
 const maskImg = document.createElement('canvas'); maskImg.width = MASK_W; maskImg.height = MASK_H;
 function brushAt(e) {
   const pl = plot(), cx = (e.clientX - pl.x) / pl.w * MASK_W, cy = (e.clientY - pl.y) / pl.h * MASK_H;
-  const rx = 0.045 * MASK_W * (pl.h / pl.w > 1 ? 1.6 : 1), ry = rx * (pl.w / pl.h) * (MASK_H / MASK_W);
+  const rx = br * MASK_W, ry = br * pl.w / pl.h * MASK_H;
   if (!E.mask) E.mask = new Float32Array(MASK_W * MASK_H);
   const M = E.mask, on = tool === 'paint';
   for (let c = Math.max(0, Math.floor(cx - rx)); c <= Math.min(MASK_W - 1, Math.ceil(cx + rx)); c++)
@@ -373,11 +390,12 @@ function brushAt(e) {
   dirty = true;
 }
 function drawMask(pl) {
-  if (brush && tool) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(brush.x, brush.y, 0.045 * pl.w * (pl.h / pl.w > 1 ? 1.6 : 1), 0, 7); ctx.stroke(); }
+  if (brush && tool) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(brush.x, brush.y, br * pl.w, 0, 7); ctx.stroke(); }
   if (!E.mask || S.view !== 'out') return;
   const mx = maskImg.getContext('2d'), id = mx.createImageData(MASK_W, MASK_H);
   for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) { const i = (r * MASK_W + c) * 4; id.data[i] = id.data[i + 1] = id.data[i + 2] = 255; id.data[i + 3] = E.mask[c * MASK_H + r] * (tool ? 22 : 0); }
   mx.putImageData(id, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(maskImg, pl.x, pl.y, pl.w, pl.h); ctx.imageSmoothingEnabled = false;
+  if (!outline) return;
   // outline: a dot on every grid edge where painted meets unpainted, which reads as a dotted line
   const M = E.mask, cw = pl.w / MASK_W, rh = pl.h / MASK_H, on = (c, r) => c >= 0 && c < MASK_W && r >= 0 && r < MASK_H && M[c * MASK_H + r] > 0.5;
   ctx.fillStyle = '#ffd23f';
@@ -453,6 +471,7 @@ addEventListener('keydown', e => {
   else if (k === 'v') cycleView();
   else if (k === 'c') toggleColor();
   else if (k === 's') swapAB();
+  else if ((k === '[' || k === ']') && tool) setBr(k === ']' ? 0.005 : -0.005);
   else if (k === '0') { P.dt = 0; P.st = 0; dirty = true; readout(); }
   else if (k === '?') toggleInfo(true);
   else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); if (E) nudgeT((k === 'ArrowRight' ? 1 : -1) * E.F / (e.shiftKey ? 32 : 160)); }

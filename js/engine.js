@@ -253,31 +253,33 @@ function makeEngine(SR) {
     const F = E.F, ratio = Math.pow(2, p.st / 12), fb = (((fi - Math.round(p.dt)) % F) + F) % F, TW = 2 * Math.PI;
     let outE = 0, refE = 0;
     const M = E.mask, mrow = E.maskRow, mcol = M ? Math.min(MASK_W - 1, Math.floor(fi / F * MASK_W)) * MASK_H : 0, solo = p.solo;
-    const sc = E.sc || (E.sc = new Float32Array(BINS));
+    const sc = E.sc || (E.sc = new Float32Array(BINS)), wk = E.wk || (E.wk = new Float32Array(BINS));
     for (let k = 0; k < BINS; k++) {
       const a = A.v[fi * BINS + k], kb = k / ratio, b = E.sampleB(B, fi, kb);
       let vo;
       if (solo === 'a') vo = a;
       else if (solo === 'b') vo = b;
-      else { vo = blendValue(p, a, b); if (M) vo = a + (vo - a) * M[mcol + mrow[k]]; }   // painted mask: blend only where painted
+      else { vo = blendValue(p, a, b); if (M) vo = a + (vo - a) * M[mcol + mrow[k]]; }
+      wk[k] = solo ? 0 : M ? M[mcol + mrow[k]] : 1;   // how much of this bin is blended (loudness levelling only applies there)   // painted mask: blend only where painted
       let m = vo < 0.004 ? 0 : Math.pow(10, (vo - 1) * DB / 20);
       const i0 = Math.min(BINS - 1, Math.floor(kb));
       // Phase: reuse the original recording's phase from whichever layer dominates this bin, so unpitched sound is
       // rebuilt exactly (no smear). Only a pitch-shifted B needs its phase re-synthesised.
-      const useA = solo === 'a' || (solo !== 'b' && a >= b);
+      // outside the mask the output is pure A, so take A's phase there even where B is louder (B's phase would leak B's texture)
+      const useA = solo === 'a' || (solo !== 'b' && (a >= b || (M && M[mcol + mrow[k]] < 0.5)));
       // v is clipped to 0..1 for blending; rebuild from the layer's true magnitude, scaled by how far the blend moved it
       if (useA) { E.phi[k] = A.ph[fi * BINS + k]; sc[k] = A.scale; if (a > 0.004) m = A.mag[fi * BINS + k] * A.scale * Math.pow(10, (vo - a) * DB / 20); }
       else if (p.st === 0) { E.phi[k] = B.ph[fb * BINS + k]; sc[k] = B.scale; if (b > 0.004) m = B.mag[fb * BINS + k] * B.scale * Math.pow(10, (vo - b) * DB / 20); }
       else { E.phi[k] += TW * B.ifq[fb * BINS + i0] * ratio * HOP / N; if (E.phi[k] > 1e4) E.phi[k] %= TW; sc[k] = B.scale; }
       if (vo < 0.004) m = 0;
-      om[k] = m; outE += m * m;
-      if (a > 0.004) refE += Math.pow(10, (a - 1) * DB / 10);
-      if (b > 0.004) refE += Math.pow(10, (b - 1) * DB / 10);
+      om[k] = m; outE += wk[k] * m * m;
+      if (a > 0.004) refE += wk[k] * Math.pow(10, (a - 1) * DB / 10);
+      if (b > 0.004) refE += wk[k] * Math.pow(10, (b - 1) * DB / 10);
     }
     // solo plays at the recording's own level; blends keep loudness steady (quiet results lifted, loud ones tamed)
-    const want = solo ? 1 : outE > 1e-9 ? Math.max(0.25, Math.min(10, 0.75 * Math.sqrt(refE / outE))) : E.agc;
+    const want = solo ? 1 : outE > 1e-6 ? Math.max(0.25, Math.min(10, 0.75 * Math.sqrt(refE / outE))) : E.agc;
     E.agc += (want - E.agc) * (solo ? 0.3 : 0.05);
-    for (let k = 0; k < BINS; k++) { const g = om[k] * E.agc / sc[k]; re[k] = g * Math.cos(E.phi[k]); im[k] = g * Math.sin(E.phi[k]); }
+    for (let k = 0; k < BINS; k++) { const g = om[k] * (1 + (E.agc - 1) * wk[k]) / sc[k]; re[k] = g * Math.cos(E.phi[k]); im[k] = g * Math.sin(E.phi[k]); }
     im[0] = 0; im[N / 2] = 0;
     for (let k = 1; k < N / 2; k++) { re[N - k] = re[k]; im[N - k] = -im[k]; }
     fft(re, im, true);
