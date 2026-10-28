@@ -27,7 +27,6 @@ const ICON = {
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
   swap: svg(14, 14, '<path class="s" d="M4 13 V1.5 M1 4.5 L4 1.5 L7 4.5 M10 1 V12.5 M7 9.5 L10 12.5 L13 9.5"/>'),
   mask: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5"/><circle class="f" cx="10" cy="7" r="3"/>'),
-  outline: svg(20, 14, '<rect class="s" x="0.75" y="0.75" width="18.5" height="12.5" stroke-dasharray="1.5 2.5"/>'),
   paint: svg(14, 14, '<circle class="f" cx="7" cy="7" r="6"/>'),
   erase: svg(14, 14, '<circle class="s" cx="7" cy="7" r="5.25"/>'),   // ring drawn inside, so its outer edge matches the paint dot
   download: svg(14, 16, '<path class="s" d="M7 1.5 V11 M3 7 L7 11 L11 7 M1 14.5 H13"/>'),
@@ -70,9 +69,7 @@ const popFor = l => `<div class="pop" id="pop${l}" hidden>
 const popMask = `<div class="pop" id="popM" hidden>
   <button class="t" id="mPaint" type="button" data-hint="Paint mask · blend only where painted">${ICON.paint}</button>
   <button class="t" id="mErase" type="button" data-hint="Erase mask">${ICON.erase}</button>
-  <button class="t" id="mSize" type="button" data-hint="Brush size · drag up or down"><span class="fill" id="fSize"></span><span class="v" id="vSize"></span></button>
-  <button class="t" id="mLine" type="button" data-hint="Show or hide the mask outline">${ICON.outline}</button>
-  <button class="t" id="mClear" type="button" data-hint="Clear mask"><span class="lt">CLR</span></button></div>`;
+</div>`;
 const popExp = `<div class="pop" id="popX" hidden>
   <button class="t" id="recX" type="button" data-hint="Record session · tap again to stop and save"></button>
   <button class="t" id="dlX" type="button" data-hint="Download loop as WAV">${ICON.download}</button></div>`;
@@ -123,20 +120,33 @@ function computeImage() {
   if (!E || !E.sources.A || !E.sources.B) return;
   const A = E.sources[P.a], B = E.sources[P.b], F = E.F, ratio = Math.pow(2, P.st / 12), d = imgData.data;
   if (!rowBin) rowBin = Array.from({ length: ROWS }, (_, r) => FMIN * Math.pow(FMAX / FMIN, 1 - r / (ROWS - 1)) / E.SR * N);
+  if (!cA || cA.length !== COLS * ROWS) { cA = new Float32Array(COLS * ROWS); cV = new Float32Array(COLS * ROWS); cW = new Float32Array(COLS * ROWS); }
+  // cache A, the unmasked blend and the colour weight per pixel, so painting a mask only has to recompose
   for (let c = 0; c < COLS; c++) {
     const f = Math.floor(c / COLS * F);
     for (let r = 0; r < ROWS; r++) {
       const kb = rowBin[r], k0 = Math.min(BINS - 2, Math.floor(kb)), fr = kb - k0;
       const a = A.v[f * BINS + k0] * (1 - fr) + A.v[f * BINS + k0 + 1] * fr;
-      const b = E.sampleB(B, f, kb / ratio);
-      let v = S.view === 'a' ? a : S.view === 'b' ? b : blendValue(P, a, b);
-      if (E.mask && S.view === 'out') v = a + (v - a) * E.mask[Math.min(MASK_W - 1, Math.floor(c / COLS * MASK_W)) * MASK_H + Math.min(MASK_H - 1, Math.floor(r / ROWS * MASK_H))];
-      const wa = S.view === 'a' ? 1 : S.view === 'b' ? 0 : (a + 1e-4) / (a + b + 2e-4);
-      const i = r * COLS + c;
-      paint(d, i * 4, v, wa, grain[i]);
+      const b = E.sampleB(B, f, kb / ratio), i = r * COLS + c;
+      cA[i] = a; cV[i] = S.view === 'a' ? a : S.view === 'b' ? b : blendValue(P, a, b);
+      cW[i] = S.view === 'a' ? 1 : S.view === 'b' ? 0 : (a + 1e-4) / (a + b + 2e-4);
     }
   }
-  ix.putImageData(imgData, 0, 0);
+  composite(0, COLS - 1);
+}
+let cA = null, cV = null, cW = null, mdirty = null, maskVer = 0;
+function composite(c0, c1) {
+  if (!cA) return;
+  const d = imgData.data, M = S.view === 'out' ? E.mask : null;
+  for (let c = c0; c <= c1; c++) {
+    const mc = Math.min(MASK_W - 1, Math.floor(c / COLS * MASK_W)) * MASK_H;
+    for (let r = 0; r < ROWS; r++) {
+      const i = r * COLS + c; let v = cV[i];
+      if (M) v = cA[i] + (v - cA[i]) * M[mc + Math.min(MASK_H - 1, Math.floor(r / ROWS * MASK_H))];
+      paint(d, i * 4, v, cW[i], grain[i]);
+    }
+  }
+  ix.putImageData(imgData, 0, 0, c0, 0, c1 - c0 + 1, ROWS);
 }
 function thumb(layer) {
   const c = $(layer === 'A' ? 'thA' : 'thB'), x = c.getContext('2d'), w = c.width, h = c.height, id = x.createImageData(w, h), s = E.sources[layer];
@@ -155,7 +165,8 @@ function draw() {
     const t = sess.n / AC.sampleRate, mm = Math.floor(t / 60), ss = Math.floor(t % 60);
     $('vExp').textContent = `${mm}:${String(ss).padStart(2, '0')}`;
   }
-  if (dirty) { computeImage(); dirty = false; }
+  if (dirty) { computeImage(); dirty = false; mdirty = null; }
+  else if (mdirty && E) { composite(Math.max(0, Math.floor(mdirty[0] / MASK_W * COLS) - 1), Math.min(COLS - 1, Math.ceil((mdirty[1] + 1) / MASK_W * COLS))); mdirty = null; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   const pl = plot(), hair = 1 / DPR;
@@ -210,7 +221,6 @@ function syncUI() {
   $('tMode').innerHTML = modeGlyph(P.mode); $('tMode').classList.toggle('on', !$('modeRow').hidden);
   $('popM').hidden = S.pop !== 'M'; $('tMask').innerHTML = ICON.mask; $('tMask').classList.toggle('on', S.pop === 'M' || !!tool);
   if (!br) br = brDefault();
-  $('vSize').textContent = Math.round(br * 100); $('fSize').style.height = `${(br - BR_MIN) / (BR_MAX - BR_MIN) * 100}%`; $('mLine').classList.toggle('on', outline);
   $('mPaint').classList.toggle('on', tool === 'paint'); $('mErase').classList.toggle('on', tool === 'erase');
   $('popX').hidden = S.pop !== 'X'; $('tExp').classList.toggle('on', S.pop === 'X');
   $('recX').innerHTML = sess ? ICON.recStop : ICON.rec; $('tExp').classList.toggle('recording', !!sess);
@@ -355,18 +365,11 @@ $('tMask').onclick = () => { if (tool && S.pop !== 'M') { tool = null; syncUI();
 const setTool = t => { tool = tool === t ? null : t; S.pop = null; syncUI(); };
 $('mPaint').onclick = () => setTool('paint');
 $('mErase').onclick = () => setTool('erase');
-$('mLine').onclick = () => { outline = !outline; syncUI(); };
-const setBr = d => { br = Math.max(BR_MIN, Math.min(BR_MAX, br + d)); syncUI(); };
-{
-  const el = $('mSize'); let st = null;
-  el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); st = { y: e.clientY }; });
-  el.addEventListener('pointermove', e => { if (!st) return; setBr((st.y - e.clientY) / 140 * (BR_MAX - BR_MIN)); st.y = e.clientY; });
-  el.addEventListener('pointerup', () => { st = null; }); el.addEventListener('pointercancel', () => { st = null; });
-  el.addEventListener('wheel', e => { e.preventDefault(); setBr(-Math.sign(e.deltaY) * 0.005); }, { passive: false });
-}
-// while painting, the scroll wheel and [ ] also resize the brush
+const toggleOutline = () => { outline = !outline; maskVer++; say(outline ? 'Outline on' : 'Outline off'); };
+const setBr = d => { if (!br) br = brDefault(); br = Math.max(BR_MIN, Math.min(BR_MAX, br + d)); say(`Brush ${Math.round(br * 100)}`); };
+// while painting, the scroll wheel also resizes the brush
 cv.addEventListener('wheel', e => { if (!tool) return; e.preventDefault(); setBr(-Math.sign(e.deltaY) * 0.005); }, { passive: false });
-$('mClear').onclick = () => { if (E) E.mask = null; tool = null; S.pop = null; dirty = true; syncUI(); say('Mask cleared'); };
+const clearMask = () => { if (!E || !E.mask) return; E.mask = null; maskVer++; mdirty = [0, MASK_W - 1]; say('Mask cleared'); };
 document.querySelectorAll('.t.sw').forEach(b => b.onclick = swapAB);
 function swapAB() {
   if (!E) return;
@@ -376,36 +379,58 @@ function swapAB() {
 
 /* ───────── mask: painted on the picture, stored as a coarse time × pitch grid ───────── */
 const maskImg = document.createElement('canvas'); maskImg.width = MASK_W; maskImg.height = MASK_H;
-function brushAt(e) {
-  const pl = plot(), cx = (e.clientX - pl.x) / pl.w * MASK_W, cy = (e.clientY - pl.y) / pl.h * MASK_H;
-  const rx = br * MASK_W, ry = br * pl.w / pl.h * MASK_H;
-  if (!E.mask) E.mask = new Float32Array(MASK_W * MASK_H);
+let lastStamp = null;
+function stamp1(cx, cy, rx, ry) {
   const M = E.mask, on = tool === 'paint';
-  for (let c = Math.max(0, Math.floor(cx - rx)); c <= Math.min(MASK_W - 1, Math.ceil(cx + rx)); c++)
+  const c0 = Math.max(0, Math.floor(cx - rx)), c1 = Math.min(MASK_W - 1, Math.ceil(cx + rx));
+  for (let c = c0; c <= c1; c++)
     for (let r = Math.max(0, Math.floor(cy - ry)); r <= Math.min(MASK_H - 1, Math.ceil(cy + ry)); r++) {
       const d = Math.hypot((c + 0.5 - cx) / rx, (r + 0.5 - cy) / ry); if (d > 1) continue;
       const w = Math.min(1, (1 - d) * 2.5), i = c * MASK_H + r;
       M[i] = on ? Math.max(M[i], w) : Math.min(M[i], 1 - w);
     }
-  dirty = true;
+  if (c0 <= c1) mdirty = mdirty ? [Math.min(mdirty[0], c0), Math.max(mdirty[1], c1)] : [c0, c1];
 }
+// stamps along the path from the last point, so fast strokes stay continuous instead of beading
+function brushAt(e, first) {
+  const pl = plot(), cx = (e.clientX - pl.x) / pl.w * MASK_W, cy = (e.clientY - pl.y) / pl.h * MASK_H;
+  const rx = br * MASK_W, ry = br * pl.w / pl.h * MASK_H;
+  if (!E.mask) E.mask = new Float32Array(MASK_W * MASK_H);
+  const p0 = first || !lastStamp ? { x: cx, y: cy } : lastStamp;
+  const n = Math.max(1, Math.ceil(Math.hypot((cx - p0.x) / rx, (cy - p0.y) / ry) * 4));
+  for (let s = first ? 0 : 1; s <= n; s++) stamp1(p0.x + (cx - p0.x) * s / n, p0.y + (cy - p0.y) * s / n, rx, ry);
+  lastStamp = { x: cx, y: cy }; maskVer++;
+}
+// the faint fill and the dotted outline are drawn once per mask change into their own layer
+const maskLayer = document.createElement('canvas'); let maskKey = '';
 function drawMask(pl) {
-  if (brush && tool) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(brush.x, brush.y, br * pl.w, 0, 7); ctx.stroke(); }
-  if (!E.mask || S.view !== 'out') return;
-  const mx = maskImg.getContext('2d'), id = mx.createImageData(MASK_W, MASK_H);
-  for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) { const i = (r * MASK_W + c) * 4; id.data[i] = id.data[i + 1] = id.data[i + 2] = 255; id.data[i + 3] = E.mask[c * MASK_H + r] * (tool ? 22 : 0); }
-  mx.putImageData(id, 0, 0); ctx.imageSmoothingEnabled = true; ctx.drawImage(maskImg, pl.x, pl.y, pl.w, pl.h); ctx.imageSmoothingEnabled = false;
-  if (!outline) return;
-  // outline: a dot on every grid edge where painted meets unpainted, which reads as a dotted line
-  const M = E.mask, cw = pl.w / MASK_W, rh = pl.h / MASK_H, on = (c, r) => c >= 0 && c < MASK_W && r >= 0 && r < MASK_H && M[c * MASK_H + r] > 0.5;
-  ctx.fillStyle = '#ffd23f';
-  for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) {
-    if (!on(c, r)) continue;
-    if (!on(c - 1, r)) ctx.fillRect(Math.round(pl.x + c * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
-    if (!on(c + 1, r)) ctx.fillRect(Math.round(pl.x + (c + 1) * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
-    if (!on(c, r - 1)) ctx.fillRect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + r * rh) - 1, 2, 2);
-    if (!on(c, r + 1)) ctx.fillRect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + (r + 1) * rh) - 1, 2, 2);
+  if (E.mask && S.view === 'out') {
+    const key = `${maskVer}|${!!tool}|${outline}|${cv.width}|${cv.height}`;
+    if (key !== maskKey) {
+      maskKey = key; maskLayer.width = cv.width; maskLayer.height = cv.height;
+      const lx = maskLayer.getContext('2d'); lx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      if (tool) {
+        const mx = maskImg.getContext('2d'), id = mx.createImageData(MASK_W, MASK_H);
+        for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) { const i = (r * MASK_W + c) * 4; id.data[i] = id.data[i + 1] = id.data[i + 2] = 255; id.data[i + 3] = E.mask[c * MASK_H + r] * 22; }
+        mx.putImageData(id, 0, 0); lx.imageSmoothingEnabled = true; lx.drawImage(maskImg, pl.x, pl.y, pl.w, pl.h);
+      }
+      if (outline) {
+        // a dot on every grid edge where painted meets unpainted, which reads as a dotted line
+        const M = E.mask, cw = pl.w / MASK_W, rh = pl.h / MASK_H, on = (c, r) => c >= 0 && c < MASK_W && r >= 0 && r < MASK_H && M[c * MASK_H + r] > 0.5;
+        lx.fillStyle = '#ffd23f'; lx.beginPath();
+        for (let c = 0; c < MASK_W; c++) for (let r = 0; r < MASK_H; r++) {
+          if (!on(c, r)) continue;
+          if (!on(c - 1, r)) lx.rect(Math.round(pl.x + c * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
+          if (!on(c + 1, r)) lx.rect(Math.round(pl.x + (c + 1) * cw) - 1, Math.round(pl.y + (r + 0.5) * rh) - 1, 2, 2);
+          if (!on(c, r - 1)) lx.rect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + r * rh) - 1, 2, 2);
+          if (!on(c, r + 1)) lx.rect(Math.round(pl.x + (c + 0.5) * cw) - 1, Math.round(pl.y + (r + 1) * rh) - 1, 2, 2);
+        }
+        lx.fill();
+      }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(maskLayer, 0, 0); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
+  if (brush && tool) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(brush.x, brush.y, br * pl.w, 0, 7); ctx.stroke(); }
 }
 $('dlX').onclick = downloadLoop;
 $('recX').onclick = () => sess ? stopSession() : startSession();
@@ -471,7 +496,9 @@ addEventListener('keydown', e => {
   else if (k === 'v') cycleView();
   else if (k === 'c') toggleColor();
   else if (k === 's') swapAB();
-  else if ((k === '[' || k === ']') && tool) setBr(k === ']' ? 0.005 : -0.005);
+  else if (k === '[' || k === ']') setBr(k === ']' ? 0.005 : -0.005);
+  else if (k === 'l' || k === 'L') toggleOutline();
+  else if (k === 'Backspace' || k === 'Delete') { e.preventDefault(); clearMask(); }
   else if (k === '0') { P.dt = 0; P.st = 0; dirty = true; readout(); }
   else if (k === '?') toggleInfo(true);
   else if (k === 'ArrowLeft' || k === 'ArrowRight') { e.preventDefault(); if (E) nudgeT((k === 'ArrowRight' ? 1 : -1) * E.F / (e.shiftKey ? 32 : 160)); }
@@ -484,17 +511,19 @@ cv.addEventListener('pointerdown', e => {
   if (e.button !== 0) return; if (!$('modeRow').hidden) toggleModes(false); if (S.pop) { S.pop = null; syncUI(); }
   const now = performance.now(); if (now - lastTap < 300) { P.dt = 0; P.st = 0; dirty = true; readout(); lastTap = 0; return; } lastTap = now;
   if (!E) return; e.preventDefault(); cv.setPointerCapture(e.pointerId);
-  if (tool) { drag = { paint: true }; brushAt(e); return; }
+  if (tool) { drag = { paint: true }; brushAt(e, true); return; }
   drag = { x: e.clientX, y: e.clientY, dt: P.dt, st: P.st }; cv.style.cursor = 'grabbing';
 });
 cv.addEventListener('pointermove', e => {
   if (tool) brush = { x: e.clientX, y: e.clientY };
-  if (!drag) return; if (drag.paint) { brushAt(e); return; } const pl = plot();
+  if (!drag) return;
+  if (drag.paint) { const ev = e.getCoalescedEvents ? e.getCoalescedEvents() : null; for (const ce of ev && ev.length ? ev : [e]) brushAt(ce); return; }
+  const pl = plot();
   P.dt = (((drag.dt + (e.clientX - drag.x) / pl.w * E.F) % E.F) + E.F) % E.F;
   P.st = Math.max(-12, Math.min(12, Math.round(drag.st - (e.clientY - drag.y) * 12 * Math.log2(FMAX / FMIN) / pl.h)));
   dirty = true; readout();
 });
-const endDrag = () => { if (drag && drag.paint && E.mask && !E.mask.some(v => v > 0.01)) E.mask = null; drag = null; cv.style.cursor = tool ? 'crosshair' : 'grab'; };
+const endDrag = () => { if (drag && drag.paint && E.mask && !E.mask.some(v => v > 0.01)) { E.mask = null; maskVer++; mdirty = [0, MASK_W - 1]; } drag = null; lastStamp = null; cv.style.cursor = tool ? 'crosshair' : 'grab'; };
 cv.addEventListener('pointerleave', () => { brush = null; });
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
 
