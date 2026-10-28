@@ -137,7 +137,6 @@ function draw() {
   if (sess) {
     const t = sess.n / AC.sampleRate, mm = Math.floor(t / 60), ss = Math.floor(t % 60);
     $('vExp').textContent = `${mm}:${String(ss).padStart(2, '0')}`;
-    if (!rec) { S.note = `Recording session · ${$('vExp').textContent}`; readout(); }
   }
   if (dirty) { computeImage(); dirty = false; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -179,7 +178,7 @@ function readout() {
   parts.push(`${Math.round((BOOL[P.mode] ? (P.th - 0.05) / 0.9 : P.op) * 100)}%`);
   $('r1').innerHTML = `<span class="lt">${parts.join(' ')}</span>`;
   $('r2').textContent = !S.ready ? 'Tuning…' : S.note || S.hint || '';
-  $('r2').classList.toggle('rec', !!(rec || sess) && !S.hint);
+  $('r2').classList.toggle('rec', !!rec && !S.hint);
   const isB = !!BOOL[P.mode], mix = isB ? (P.th - 0.05) / 0.9 : P.op;
   $('vMix').textContent = Math.round(mix * 100);
   $('fMix').style.height = `${mix * 100}%`;
@@ -187,7 +186,7 @@ function readout() {
 }
 function syncUI() {
   document.body.classList.toggle('col', S.color);
-  $('tView').innerHTML = `<span class="lt">${S.view === 'out' ? 'AƒB' : S.view.toUpperCase()}</span>`;
+  $('tView').innerHTML = `<span class="lt">${S.view === 'out' ? 'A<span class="fn">ƒ</span>B' : S.view.toUpperCase()}</span>`;
   $('tView').classList.toggle('on', S.view !== 'out');
   P.solo = S.view === 'out' ? null : S.view;
   $('tDrift').innerHTML = ICON.drift; $('tDrift').classList.toggle('on', S.drift);
@@ -369,7 +368,7 @@ function startSession() {
   sess = { l: [], r: [], n: 0 }; S.pop = null; syncUI();
 }
 function stopSession() {
-  const s2 = sess; sess = null; $('vExp').textContent = 'EXP'; S.note = ''; syncUI();
+  const s2 = sess; sess = null; $('vExp').textContent = 'EXP'; syncUI();
   if (!s2 || s2.n < AC.sampleRate * 0.2) { say('Too short'); return; }
   const join = parts => { const o = new Float32Array(s2.n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; };
   saveBlob(wavBlob([join(s2.l), join(s2.r)], AC.sampleRate), `audio-blend-session-${stamp()}.wav`);
