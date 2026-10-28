@@ -26,6 +26,7 @@ const ICON = {
   rec: svg(14, 14, '<circle class="red" cx="7" cy="7" r="6.5"/>'),
   recStop: svg(12, 12, '<rect class="red" x="0" y="0" width="12" height="12"/>'),
   upload: svg(14, 16, '<path class="s" d="M7 11 V1.5 M3 5.5 L7 1.5 L11 5.5 M1 14.5 H13"/>'),
+  download: svg(14, 16, '<path class="s" d="M7 1.5 V11 M3 7 L7 11 L11 7 M1 14.5 H13"/>'),
 };
 function venn(op) {
   const L = 'M2 9 a6.5 6.5 0 1 0 13 0 a6.5 6.5 0 1 0 -13 0 Z', Rr = 'M9 9 a6.5 6.5 0 1 0 13 0 a6.5 6.5 0 1 0 -13 0 Z', id = 'vc' + (uid++);
@@ -42,7 +43,7 @@ const modeGlyph = m => BOOL[m] ? venn(m) : `<span class="lt">${ABBR[m]}</span>`;
 /* ───────── state ───────── */
 let AC = null, E = null, master = null;
 const S = { playing: false, ready: false, drift: false, color: false, view: 'out', hint: '', note: '', loading: {}, pop: null };
-let rec = null;
+let rec = null, sess = null;
 let P = { a: 'A', b: 'B', mode: 'multiply', op: 0.75, th: 0.725, dt: 47, st: 0 };
 
 /* ───────── tile row ───────── */
@@ -50,16 +51,20 @@ const CELLS = [
   ['tPlay', 'Play / Stop', ''],
   ['tA', 'Layer A', '<canvas id="thA" width="40" height="40"></canvas><span class="lt">A</span>'],
   ['tB', 'Layer B', '<canvas id="thB" width="40" height="40"></canvas><span class="lt">B</span>'],
-  ['tView', 'View', ''],
+  ['tView', 'A ƒ B · result, A solo or B solo', ''],
   ['tDrift', 'Drift', ''],
   ['tColor', 'Colour', ''],
   ['tMode', 'Modes', ''],
   ['tMix', '', '<span class="fill" id="fMix"></span><span class="v" id="vMix"></span>'],
+  ['tExp', 'Export', '<span class="lt" id="vExp">EXP</span>'],
 ];
 const popFor = l => `<div class="pop" id="pop${l}" hidden>
   <button class="t" id="rec${l}" type="button" data-hint="Record ${l}"><span class="fill rec" id="fRec${l}" style="height:0"></span></button>
   <button class="t" id="up${l}" type="button" data-hint="Upload ${l}">${ICON.upload}</button></div>`;
-$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
+const popExp = `<div class="pop" id="popX" hidden>
+  <button class="t" id="recX" type="button" data-hint="Record session · tap again to stop and save"></button>
+  <button class="t" id="dlX" type="button" data-hint="Download loop as WAV">${ICON.download}</button></div>`;
+$('mainRow').innerHTML = CELLS.map(([id, h, c]) => `<div class="cell">${id === 'tA' ? popFor('A') : id === 'tB' ? popFor('B') : id === 'tExp' ? popExp : ''}<button class="t" id="${id}" type="button" data-hint="${h}">${c}</button></div>`).join('');
 $('stage').appendChild($('info'));   // same layer as the tiles, so the ? can sit above the panel and become its close button
 
 /* ───────── canvas ───────── */
@@ -79,7 +84,7 @@ function resize() {
   const pl = plot();
   Object.assign(ov.style, { left: pl.x + 'px', top: pl.y + 'px', width: pl.w + 'px', height: pl.h + 'px' });
   if (narrow) {
-    const n = 8, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
+    const n = $('mainRow').children.length, g = 4, edge = 8, t = Math.max(30, Math.min(56, Math.floor((Math.floor(pl.w) - 2 * edge - (n - 1) * g - 1) / n)));
     document.documentElement.style.setProperty('--tile', t + 'px');
     document.documentElement.style.setProperty('--k', (t / 44).toFixed(3));
     document.documentElement.style.setProperty('--edge', Math.floor((Math.floor(pl.w) - n * t - (n - 1) * g) / 2) + 'px');
@@ -129,6 +134,11 @@ function draw() {
     $('fRec' + rec.layer).style.height = `${rec.n / E.MAX * 100}%`;
     S.note = `Recording ${rec.layer} · ${(rec.n / AC.sampleRate).toFixed(1)} s`; readout();
   }
+  if (sess) {
+    const t = sess.n / AC.sampleRate, mm = Math.floor(t / 60), ss = Math.floor(t % 60);
+    $('vExp').textContent = `${mm}:${String(ss).padStart(2, '0')}`;
+    if (!rec) { S.note = `Recording session · ${$('vExp').textContent}`; readout(); }
+  }
   if (dirty) { computeImage(); dirty = false; }
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
@@ -169,6 +179,7 @@ function readout() {
   parts.push(`${Math.round((BOOL[P.mode] ? (P.th - 0.05) / 0.9 : P.op) * 100)}%`);
   $('r1').innerHTML = `<span class="lt">${parts.join(' ')}</span>`;
   $('r2').textContent = !S.ready ? 'Tuning…' : S.note || S.hint || '';
+  $('r2').classList.toggle('rec', !!(rec || sess) && !S.hint);
   const isB = !!BOOL[P.mode], mix = isB ? (P.th - 0.05) / 0.9 : P.op;
   $('vMix').textContent = Math.round(mix * 100);
   $('fMix').style.height = `${mix * 100}%`;
@@ -176,11 +187,14 @@ function readout() {
 }
 function syncUI() {
   document.body.classList.toggle('col', S.color);
-  $('tView').innerHTML = S.view === 'out' ? ICON.eye : `<span class="lt">${S.view.toUpperCase()}</span>`;
+  $('tView').innerHTML = `<span class="lt">${S.view === 'out' ? 'AƒB' : S.view.toUpperCase()}</span>`;
   $('tView').classList.toggle('on', S.view !== 'out');
+  P.solo = S.view === 'out' ? null : S.view;
   $('tDrift').innerHTML = ICON.drift; $('tDrift').classList.toggle('on', S.drift);
   $('tColor').innerHTML = `<span class="lt">${S.color ? 'COL' : 'BW'}</span>`;
   $('tMode').innerHTML = modeGlyph(P.mode); $('tMode').classList.toggle('on', !$('modeRow').hidden);
+  $('popX').hidden = S.pop !== 'X'; $('tExp').classList.toggle('on', S.pop === 'X');
+  $('recX').innerHTML = sess ? ICON.recStop : ICON.rec; $('tExp').classList.toggle('recording', !!sess);
   ['A', 'B'].forEach(l => { $('pop' + l).hidden = S.pop !== l; $('t' + l).classList.toggle('on', S.pop === l); $('rec' + l).querySelectorAll('svg').forEach(n => n.remove()); $('rec' + l).insertAdjacentHTML('beforeend', rec && rec.layer === l ? ICON.recStop : ICON.rec); });
   const pb = $('tPlay'); pb.disabled = !S.ready; pb.innerHTML = S.playing ? ICON.stop : ICON.play; pb.classList.toggle('on', S.playing);
   pb.setAttribute('aria-label', S.playing ? 'Stop' : 'Play');
@@ -204,7 +218,7 @@ const toggleModes = force => { const p = $('modeRow'); p.hidden = typeof force =
 document.addEventListener('pointerdown', e => {
   const t = e.target.closest('.t');
   let changed = false;
-  if (S.pop && !(t && (t.id === 't' + S.pop || t.closest('#pop' + S.pop)))) { S.pop = null; changed = true; }
+  if (S.pop && !(t && (t.id === (S.pop === 'X' ? 'tExp' : 't' + S.pop) || t.closest('#pop' + S.pop)))) { S.pop = null; changed = true; }
   if (!$('modeRow').hidden && !(t && (t.id === 'tMode' || t.closest('#modeRow')))) { $('modeRow').hidden = true; changed = true; }
   if (changed) syncUI();
 }, true);
@@ -317,6 +331,50 @@ function stopRec() {
 const cycleView = () => { S.view = VIEWS[(VIEWS.indexOf(S.view) + 1) % 3]; dirty = true; syncUI(); };
 const toggleColor = () => { S.color = !S.color; dirty = true; if (E) { thumb('A'); thumb('B'); } syncUI(); };
 $('tView').onclick = cycleView;
+$('tExp').onclick = () => togglePop('X');
+$('dlX').onclick = downloadLoop;
+$('recX').onclick = () => sess ? stopSession() : startSession();
+
+/* ───────── export ───────── */
+function wavBlob(chans, sr) {
+  const n = chans[0].length, nc = chans.length, buf = new ArrayBuffer(44 + n * nc * 2), v = new DataView(buf);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n * nc * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, nc, true); v.setUint32(24, sr, true); v.setUint32(28, sr * nc * 2, true); v.setUint16(32, nc * 2, true); v.setUint16(34, 16, true);
+  str(36, 'data'); v.setUint32(40, n * nc * 2, true);
+  let o = 44; for (let i = 0; i < n; i++) for (let c = 0; c < nc; c++) { const x = Math.max(-1, Math.min(1, chans[c][i])); v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true); o += 2; }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+function saveBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+function downloadLoop() {
+  if (!E) return;
+  say('Rendering loop…');
+  setTimeout(() => {
+    // render the loop twice with a separate engine and keep the second pass, so the loop seam is already settled
+    const R = makeEngine(E.SR); R.sources = E.sources; R.L = E.L; R.F = E.F; Object.assign(R.p, E.p); R.agc = E.agc;
+    const all = new Float32Array(E.L * 2);
+    for (let i = 0; i < all.length; i += 2048) R.render(all.subarray(i, Math.min(all.length, i + 2048)));   // the engine's buffer holds 16k samples, so render in blocks
+    const out = all.slice(E.L); let pk = 0; for (const x of out) pk = Math.max(pk, Math.abs(x));
+    if (pk > 0.98) for (let i = 0; i < out.length; i++) out[i] *= 0.98 / pk;
+    saveBlob(wavBlob([out, out], E.SR), `audio-blend-${P.mode.replace(' ', '-')}-${stamp()}.wav`);
+    say('Loop saved');
+  }, 30);
+}
+function startSession() {
+  if (!S.ready) return;
+  sess = { l: [], r: [], n: 0 }; S.pop = null; syncUI();
+}
+function stopSession() {
+  const s2 = sess; sess = null; $('vExp').textContent = 'EXP'; S.note = ''; syncUI();
+  if (!s2 || s2.n < AC.sampleRate * 0.2) { say('Too short'); return; }
+  const join = parts => { const o = new Float32Array(s2.n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; };
+  saveBlob(wavBlob([join(s2.l), join(s2.r)], AC.sampleRate), `audio-blend-session-${stamp()}.wav`);
+  say(`Session saved · ${(s2.n / AC.sampleRate).toFixed(1)} s`);
+}
 $('tDrift').onclick = () => { S.drift = !S.drift; syncUI(); };
 $('tColor').onclick = toggleColor;
 $('tMode').onclick = () => toggleModes();
@@ -377,6 +435,10 @@ async function boot() {
   verb.buffer = ir;
   const dry = AC.createGain(), wet = AC.createGain(); dry.gain.value = 0.9; wet.gain.value = 0.18;
   master.connect(dry); dry.connect(comp); master.connect(verb); verb.connect(wet); wet.connect(comp); comp.connect(AC.destination);
+  // session recorder taps the final mix, reverb and all
+  const tap = AC.createScriptProcessor(4096, 2, 2), sink = AC.createGain(); sink.gain.value = 0;
+  tap.onaudioprocess = ev => { if (!sess) return; const b = ev.inputBuffer; sess.l.push(b.getChannelData(0).slice()); sess.r.push(b.getChannelData(1).slice()); sess.n += b.length; };
+  comp.connect(tap); tap.connect(sink); sink.connect(AC.destination);
   const proc = AC.createScriptProcessor(2048, 0, 2);
   proc.onaudioprocess = ev => { const l = ev.outputBuffer.getChannelData(0); E.render(l); ev.outputBuffer.getChannelData(1).set(l); };
   proc.connect(master);

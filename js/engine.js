@@ -250,10 +250,10 @@ function makeEngine(SR) {
     let outE = 0, refE = 0;
     for (let k = 0; k < BINS; k++) {
       const a = A.v[fi * BINS + k], kb = k / ratio, b = E.sampleB(B, fi, kb);
-      const vo = blendValue(p, a, b);
+      const vo = p.solo === 'a' ? a : p.solo === 'b' ? b : blendValue(p, a, b);   // View A or B plays that layer alone
       const m = vo < 0.004 ? 0 : Math.pow(10, (vo - 1) * DB / 20);
       const i0 = Math.min(BINS - 1, Math.floor(kb));
-      const fq = a >= b ? A.ifq[fi * BINS + k] : B.ifq[fb * BINS + i0] * ratio;
+      const fq = (p.solo === 'a' || (p.solo !== 'b' && a >= b)) ? A.ifq[fi * BINS + k] : B.ifq[fb * BINS + i0] * ratio;
       E.phi[k] += TW * fq * HOP / N; if (E.phi[k] > 1e4) E.phi[k] %= TW;
       om[k] = m; outE += m * m;
       if (a > 0.004) refE += Math.pow(10, (a - 1) * DB / 10);
